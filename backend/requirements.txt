@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+sslyze
+cryptography
+pydantic
+python-dotenv
+httpx
+mysql-connector-python
