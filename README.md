@@ -235,12 +235,12 @@ Try scanning:
  
 ## 👥 Team
 
-| Member | Role | GitHub |
-|---|---|---|
-| [@chanukyachintada06](https://github.com/chanukyachintada06) | Team Lead — Risk Engine, Frontend, Integration | 
-| [@santhoshreddy28](https://github.com/santhoshreddy28) | Backend Developer — Scanner Engine & API |
-| [@ANKUSHTANWAR55](https://github.com/ANKUSHTANWAR55) | Database Engineer — MySQL Design & Data Integrity |
-| [@Anil6373](https://github.com/Anil6373)  | QA Engineer — Testing & Validation |
+| Member | Role |
+|---|---|
+| [Chanukya Venkata Sai](https://github.com/chanukyachintada06) | Team Lead — Risk Engine, Frontend, Integration | 
+| [G.L. Santhosh Reddy](https://github.com/santhoshreddy28) | Backend Developer — Scanner Engine & API |
+| [ANKUSH TANWAR55](https://github.com/ANKUSHTANWAR55) | Database Engineer — MySQL Design & Data Integrity |
+| [Anil Kumar Reddy](https://github.com/Anil6373)  | QA Engineer — Testing & Validation |
 
 ---
 ---
