@@ -222,7 +222,7 @@ Try scanning:
 ## 👥 Team
  
 | Role | Responsibility |
-
+|---|---|
 | Chanukya | Team Lead, Risk Engine, Frontend, Integration |
 | Santosh | Backend Developer, Scanner Engine & API |
 | Ankush | Database Engineer, MySQL Design & Data Integrity |
