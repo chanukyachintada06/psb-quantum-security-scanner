@@ -234,14 +234,15 @@ Try scanning:
 ---
  
 ## 👥 Team
- 
-| Role | Responsibility |
+
+| Member | Role | GitHub |
 |---|---|
-| Chanukya | Team Lead, Risk Engine, Frontend, Integration |
-| Santosh | Backend Developer, Scanner Engine & API |
-| Ankush | Database Engineer, MySQL Design & Data Integrity |
-| Anil | QA Engineer, Testing & Validation |
- 
+| [@chanukyachintada06](https://github.com/chanukyachintada06) | Team Lead — Risk Engine, Frontend, Integration | 
+| [@santhoshreddy28](https://github.com/santhoshreddy28) | Backend Developer — Scanner Engine & API |
+| [@ANKUSHTANWAR55](https://github.com/ANKUSHTANWAR55) | Database Engineer — MySQL Design & Data Integrity |
+| [@Anil6373](https://github.com/Anil6373)  | QA Engineer — Testing & Validation |
+
+---
 ---
  
 ## 🚀 Future Scope
