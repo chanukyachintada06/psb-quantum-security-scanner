@@ -236,7 +236,7 @@ Try scanning:
 ## 👥 Team
 
 | Member | Role | GitHub |
-|---|---|
+|---|---|---|
 | [@chanukyachintada06](https://github.com/chanukyachintada06) | Team Lead — Risk Engine, Frontend, Integration | 
 | [@santhoshreddy28](https://github.com/santhoshreddy28) | Backend Developer — Scanner Engine & API |
 | [@ANKUSHTANWAR55](https://github.com/ANKUSHTANWAR55) | Database Engineer — MySQL Design & Data Integrity |
