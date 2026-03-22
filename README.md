@@ -12,6 +12,20 @@ The **Quantum-Proof Systems Scanner** is a full-stack web application that perfo
 With the advent of cryptographically relevant quantum computers, classical algorithms such as RSA and ECC become breakable using Shor's algorithm. This tool helps banking institutions like Punjab National Bank identify vulnerable assets, generate a Cryptographic Bill of Materials (CBOM), and receive prioritized migration recommendations aligned to NIST PQC standards.
  
 ---
+## 🔐 Live Demo Access
+
+Try the live deployment here:
+**🔗 https://psb-hackathon2026.vercel.app/**
+
+| Username | Password | Role |
+|---|---|---|
+| `pnbuser` | `pnb@123` | PNB User |
+| `judge01` | `pnb@123` | Judge |
+| `judge02` | `pnb@123` | Judge |
+| `judge03` | `pnb@123` | Judge |
+
+> **Note:** The live deployment runs in Demo Mode (mock data).
+> For real TLS scanning, clone the repo and run the backend locally.
  
 ## 🎯 Objectives
  
