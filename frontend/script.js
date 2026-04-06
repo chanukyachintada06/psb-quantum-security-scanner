@@ -18,7 +18,11 @@ let reportingInitialized = false;
 let sidebarCollapsed = false;
 let demoMode = false;
 
+<<<<<<< HEAD
 const API_BASE_URL = 'https://psb-hackathon2026.vercel.app/';
+=======
+const API_BASE_URL = 'https://psb-hackathon2026.vercel.app';
+>>>>>>> 49c2752 (Configure Vercel for mixed deployment (Static + Python) and fix API URL)
 
 /* ============================================================
    1. MOCK DATA ENGINE
