@@ -15,6 +15,7 @@
     }
   ],
   "rewrites": [
+    { "handle": "filesystem" },
     {
       "source": "/api/(.*)",
       "destination": "/backend/main.py"
