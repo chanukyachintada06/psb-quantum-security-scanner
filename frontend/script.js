@@ -897,7 +897,7 @@ async function fetchNameservers(domain = null) {
     });
     if (!response.ok) return;
     const data = await response.json();
-    AppState.nameservers = data;
+    AppState.nameservers = data.nameservers || [];
     renderNameserverTable();
   } catch (err) {
     console.warn('Nameserver fetch error:', err);

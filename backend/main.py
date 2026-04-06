@@ -196,7 +196,7 @@ async def scan_get(domain: str, req: Request):
 # ── DB ENDPOINTS ───────────────────────────────────────────────
 @app.get("/api/assets", summary="Get asset inventory (user-scoped)")
 async def get_assets(req: Request):
-    """Returns all assets for the authenticated user."""
+    """Returns all assets for the authenticated user and their count."""
     user_id = extract_user_id(req)
     try:
         assets = db.get_assets(user_id)
@@ -260,14 +260,6 @@ async def get_domain_history(domain: str, req: Request):
 
 
 # ── ASSETS ─────────────────────────────────────────────────────
-@app.get("/api/assets", summary="Get full asset inventory")
-async def get_assets_list(req: Request):
-    """Returns the complete asset inventory for the authenticated user."""
-    user_id = extract_user_id(req)
-    try:
-        return db.get_assets(user_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/assets", summary="Add new asset")
 async def add_asset_item(request: Request):
@@ -327,7 +319,8 @@ async def get_ns_records(req: Request, domain: str = None):
     """Returns DNS/Nameserver records for the user, optionally filtered by domain."""
     user_id = extract_user_id(req)
     try:
-        return db.get_nameservers(user_id, domain)
+        records = db.get_nameservers(user_id, domain)
+        return {"nameservers": records, "count": len(records)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
