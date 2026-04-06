@@ -2233,7 +2233,7 @@ async function fetchHistoryFromSupabase() {
   try {
     const { data, error } = await sbClient
       .from('scan_results')
-      .select('id, domain, quantum_risk_score, risk_level, pqc_readiness_pct, created_at')
+      .select('id, domain, pqc_score, risk_level, created_at')
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -2243,8 +2243,8 @@ async function fetchHistoryFromSupabase() {
     AppState.scanHistory = data.map(row => ({
       domain:    row.domain,
       riskLevel: row.risk_level   || 'UNKNOWN',
-      riskScore: row.quantum_risk_score || 0,
-      readiness: row.pqc_readiness_pct  || 0,
+      riskScore: row.pqc_score || 0,
+      readiness: 0, // Computed or omitted if not in schema
       timestamp: new Date(row.created_at),
       id:        row.id,
     }));
