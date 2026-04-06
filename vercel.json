@@ -15,13 +15,12 @@
     }
   ],
   "rewrites": [
-    { "handle": "filesystem" },
     {
       "source": "/api/(.*)",
       "destination": "/backend/main.py"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!frontend|index.html|api).*)",
       "destination": "/index.html"
     }
   ]
