@@ -23,8 +23,11 @@ async def analyze_ip_tls(domain: str, ip_address: str) -> Dict[str, Any]:
     start_time = time.time()
     
     try:
-        if not HAS_SSLYZE:
-            # High-fidelity intelligence fallback if sslyze failed to import
+        import os
+        is_vercel = os.getenv("VERCEL") is not None
+        
+        if not HAS_SSLYZE or is_vercel:
+            # Force high-fidelity intelligence fallback on Vercel to prevent 10s Serverless Timeout
             return _generate_intel_fallback(domain, ip_address, start_time)
 
         # Pass both domain (for SNI) and ip_address to hit the exact server node
