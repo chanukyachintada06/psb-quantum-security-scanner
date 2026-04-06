@@ -1,5 +1,5 @@
 """
-Quantum-Proof Systems Scanner — FastAPI Backend (with MySQL)
+Quantum-Proof Systems Scanner — FastAPI Backend (Supabase)
 Team CypherRed261 — PSB Hackathon 2026
 """
 
@@ -8,11 +8,34 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import asyncio
 import time
+import os
+import jwt  # PyJWT
 
 from models import ScanRequest
 from pydantic import BaseModel
-from scanner import scan_domain
+from engine.scan_service import execute_scan
 import database as db
+
+# ── JWT HELPER ─────────────────────────────────────────────────
+SYSTEM_USER_ID = os.getenv("SYSTEM_USER_ID", "00000000-0000-0000-0000-000000000000")
+
+def extract_user_id(request: Request) -> str:
+    """
+    Extract the Supabase user UUID from the Authorization: Bearer <JWT> header.
+    If the header is missing or invalid, fall back to SYSTEM_USER_ID (demo mode).
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return SYSTEM_USER_ID
+    token = auth_header[len("Bearer "):].strip()
+    try:
+        # Decode WITHOUT verification — we trust Supabase issued it.
+        # For production: verify with Supabase JWT secret.
+        payload = jwt.decode(token, options={"verify_signature": False})
+        uid = payload.get("sub")
+        return uid if uid else SYSTEM_USER_ID
+    except Exception:
+        return SYSTEM_USER_ID
 
 # ── APP SETUP ──────────────────────────────────────────────────
 app = FastAPI(
@@ -30,7 +53,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -46,17 +69,15 @@ async def startup_event():
     print("  API:  http://localhost:8000/api/scan")
     print("=" * 60)
 
-    # Initialize database tables
-    print("\n  Connecting to MySQL database...")
+    print("\n  Connecting to Supabase...")
     if db.test_connection():
-        print("  ✅ MySQL connected successfully!")
-        db.init_db()
+        print("  ✅ Supabase connected successfully!")
         db.save_audit_log(
-            event_type='SYSTEM_STARTUP',
-            description='Quantum-Proof Systems Scanner API started'
+            action='SYSTEM_STARTUP',
+            metadata={'description': 'Quantum-Proof Systems Scanner API started'}
         )
     else:
-        print("  ⚠️  MySQL not available — running without database")
+        print("  ⚠️  Supabase not available — check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env")
     print()
 
 
@@ -82,7 +103,7 @@ async def health():
     db_status = db.test_connection()
     return {
         "status": "healthy",
-        "database": "connected" if db_status else "disconnected",
+        "database": "supabase-connected" if db_status else "supabase-disconnected",
         "timestamp": time.time()
     }
 
@@ -93,52 +114,73 @@ async def scan_post(request: ScanRequest, req: Request):
     if not request.domain or len(request.domain.strip()) < 3:
         raise HTTPException(status_code=400, detail="Domain is required")
 
-    domain = request.domain.strip()
+    domain    = request.domain.strip()
     client_ip = req.client.host if req.client else "unknown"
+    user_id   = extract_user_id(req)   # ← Supabase JWT → user UUID
 
-    # Log scan initiation
-    _safe_db(db.save_audit_log, 'SCAN_INITIATED', domain, client_ip,
-             f'Scan initiated for {domain}')
+    _safe_db(db.save_audit_log,
+             action='SCAN_INITIATED',
+             user_id=user_id,
+             domain=domain,
+             ip_address=client_ip,
+             metadata={'description': f'Scan initiated for {domain}'})
 
     try:
+        # The new engine handles timeout natively in its asyncio gather loop if needed, 
+        # but we can wrap it here to restrict overall connection hangs.
         result = await asyncio.wait_for(
-            asyncio.to_thread(_run_scan_sync, domain),
-            timeout=25.0
+            execute_scan(domain),
+            timeout=120.0 # Multiple IPs can take longer, increase timeout
         )
 
-        # ── SAVE TO DATABASE ──────────────────────────────────
-        scan_id = _safe_db(db.save_scan_result, result)
+        # ── SAVE TO SUPABASE ──────────────────────────────────
+        # Extract email from JWT for auditing
+        auth_header = req.headers.get("Authorization", "")
+        token = auth_header[len("Bearer "):].strip() if auth_header.startswith("Bearer ") else None
+        email = "unknown"
+        if token:
+            try:
+                payload = jwt.decode(token, options={"verify_signature": False})
+                email = payload.get("email", "unknown")
+            except: pass
+
+        scan_id = _safe_db(db.save_scan_result, user_id=user_id, scan_data=result, created_by=email)
 
         if scan_id:
-            # Save CBOM record
-            _safe_db(db.save_cbom_record, scan_id, result.get('cbom', {}))
+            cbom = result.get('cbom', {})
+            if cbom:
+                _safe_db(db.save_cbom_record, scan_id, cbom)
 
-            # Save classification label (FR-17, FR-18)
             risk_level = result.get('pqc', {}).get('risk_level', 'HIGH')
-            _safe_db(db.save_classification_label, scan_id, domain, risk_level)
-
-            # Audit log — scan completed
-            _safe_db(db.save_audit_log, 'SCAN_COMPLETED', domain, client_ip,
-                     f'Scan completed — Risk: {risk_level} | '
-                     f'Score: {result.get("pqc", {}).get("risk_score")}')
-
-            # Add scan_id to response
+            _safe_db(db.save_audit_log,
+                     action='SCAN_COMPLETED',
+                     user_id=user_id,
+                     domain=domain,
+                     ip_address=client_ip,
+                     metadata={
+                         'risk_level': risk_level,
+                         'risk_score': result.get('pqc', {}).get('risk_score'),
+                         'scan_id':    scan_id,
+                     })
             result['scan_id'] = scan_id
 
         return JSONResponse(content=result)
 
     except asyncio.TimeoutError:
-        _safe_db(db.save_audit_log, 'SCAN_FAILED', domain, client_ip,
-                 f'Scan timed out for {domain}')
+        _safe_db(db.save_audit_log, action='SCAN_FAILED', user_id=user_id,
+                 domain=domain, ip_address=client_ip,
+                 metadata={'error': f'Scan timed out for {domain}'})
         raise HTTPException(
             status_code=504,
             detail=f"Scan timed out for '{domain}' — server may be unreachable"
         )
     except ValueError as e:
-        _safe_db(db.save_audit_log, 'SCAN_FAILED', domain, client_ip, str(e))
+        _safe_db(db.save_audit_log, action='SCAN_FAILED', user_id=user_id,
+                 domain=domain, ip_address=client_ip, metadata={'error': str(e)})
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        _safe_db(db.save_audit_log, 'SCAN_FAILED', domain, client_ip, str(e))
+        _safe_db(db.save_audit_log, action='SCAN_FAILED', user_id=user_id,
+                 domain=domain, ip_address=client_ip, metadata={'error': str(e)})
         raise HTTPException(status_code=422, detail=str(e))
 
 
@@ -152,94 +194,153 @@ async def scan_get(domain: str, req: Request):
 
 
 # ── DB ENDPOINTS ───────────────────────────────────────────────
-@app.get("/api/history", summary="Get recent scan history from database")
-async def get_history(limit: int = 20):
-    """Returns the last N scans stored in MySQL."""
+@app.get("/api/assets", summary="Get asset inventory (user-scoped)")
+async def get_assets(req: Request):
+    """Returns all assets for the authenticated user."""
+    user_id = extract_user_id(req)
     try:
-        scans = db.get_recent_scans(limit)
-        # Convert datetime objects to strings for JSON
-        for scan in scans:
-            for key, val in scan.items():
-                if hasattr(val, 'isoformat'):
-                    scan[key] = val.isoformat()
+        assets = db.get_assets(user_id)
+        return {"assets": assets, "count": len(assets)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/history", summary="Get recent scan history (user-scoped)")
+async def get_history(req: Request, limit: int = 20):
+    """Returns the last N scans for the authenticated user."""
+    user_id = extract_user_id(req)
+    try:
+        scans = db.get_recent_scans(user_id, limit)
         return {"scans": scans, "count": len(scans)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/cbom", summary="Get CBOM records from database")
-async def get_cbom(limit: int = 50):
-    """Returns Cryptographic Bill of Materials records."""
+@app.get("/api/cbom", summary="Get CBOM records (user-scoped)")
+async def get_cbom(req: Request, limit: int = 50):
+    """Returns Cryptographic Bill of Materials records for authenticated user."""
+    user_id = extract_user_id(req)
     try:
-        records = db.get_cbom_records(limit)
-        for r in records:
-            for key, val in r.items():
-                if hasattr(val, 'isoformat'):
-                    r[key] = val.isoformat()
+        records = db.get_cbom_records(user_id, limit)
         return {"cbom_records": records, "count": len(records)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/audit", summary="Get audit logs from database")
-async def get_audit(limit: int = 50):
-    """Returns system audit log entries (SRS Section 5.4)."""
+@app.get("/api/audit", summary="Get audit logs (user-scoped)")
+async def get_audit(req: Request, limit: int = 50):
+    """Returns audit log entries for the authenticated user."""
+    user_id = extract_user_id(req)
     try:
-        logs = db.get_audit_logs(limit)
-        for log in logs:
-            for key, val in log.items():
-                if hasattr(val, 'isoformat'):
-                    log[key] = val.isoformat()
+        logs = db.get_audit_logs(user_id, limit)
         return {"audit_logs": logs, "count": len(logs)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/stats", summary="Get dashboard statistics from database")
-async def get_stats():
-    """Returns aggregated scan statistics."""
+@app.get("/api/stats", summary="Get dashboard statistics (user-scoped)")
+async def get_stats(req: Request):
+    """Returns aggregated scan statistics for the authenticated user."""
+    user_id = extract_user_id(req)
     try:
-        stats = db.get_dashboard_stats()
-        for key, val in stats.items():
-            if val is not None and hasattr(val, '__float__'):
-                stats[key] = round(float(val), 1)
-        return stats
+        return db.get_dashboard_stats(user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/domain/{domain}", summary="Get all scans for a domain")
-async def get_domain_history(domain: str):
-    """Returns all historical scans for a specific domain."""
+@app.get("/api/domain/{domain}", summary="Get all scans for a domain (user-scoped)")
+async def get_domain_history(domain: str, req: Request):
+    """Returns historical scans for a specific domain, filtered by user."""
+    user_id = extract_user_id(req)
     try:
-        scans = db.get_scans_by_domain(domain)
-        for scan in scans:
-            for key, val in scan.items():
-                if hasattr(val, 'isoformat'):
-                    scan[key] = val.isoformat()
+        scans = db.get_scans_by_domain(user_id, domain)
         return {"domain": domain, "scans": scans, "count": len(scans)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── HELPERS ────────────────────────────────────────────────────
-def _run_scan_sync(domain: str) -> dict:
-    """Run async scan in sync thread."""
-    import asyncio as _asyncio
-    loop = _asyncio.new_event_loop()
+# ── ASSETS ─────────────────────────────────────────────────────
+@app.get("/api/assets", summary="Get full asset inventory")
+async def get_assets_list(req: Request):
+    """Returns the complete asset inventory for the authenticated user."""
+    user_id = extract_user_id(req)
     try:
-        return loop.run_until_complete(scan_domain(domain))
-    finally:
-        loop.close()
+        return db.get_assets(user_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/assets", summary="Add new asset")
+async def add_asset_item(request: Request):
+    """Adds a new asset to the user's inventory. Attaches current user email as creator."""
+    user_id = extract_user_id(request)
+    data = await request.json()
+    
+    # Extract email from JWT for auditing
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[len("Bearer "):].strip() if auth_header.startswith("Bearer ") else None
+    email = "unknown"
+    if token:
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            email = payload.get("email", "unknown")
+        except: pass
+    
+    data["created_by"] = email
+    res = db.add_asset(user_id, data)
+    if not res:
+        raise HTTPException(status_code=500, detail="Failed to add asset to database")
+    return res
+
+@app.delete("/api/assets/{asset_id}", summary="Delete an asset")
+async def delete_asset_endpoint(asset_id: str, req: Request):
+    """Deletes an asset from the user's inventory."""
+    user_id = extract_user_id(req)
+    success = db.delete_asset(user_id, asset_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete asset")
+    return {"message": "Asset deleted successfully"}
+
+@app.put("/api/assets/{asset_id}", summary="Update an asset")
+async def update_asset_endpoint(asset_id: str, request: Request):
+    """Updates an existing asset's details."""
+    user_id = extract_user_id(request)
+    data = await request.json()
+    
+    # Extract email from JWT for auditing
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[len("Bearer "):].strip() if auth_header.startswith("Bearer ") else None
+    email = "unknown"
+    if token:
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            email = payload.get("email", "unknown")
+        except: pass
+    
+    data["updated_by"] = email
+    success = db.update_asset(user_id, asset_id, data)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update asset")
+    return {"message": "Asset updated successfully"}
+
+@app.get("/api/nameservers", summary="Get nameserver records")
+async def get_ns_records(req: Request, domain: str = None):
+    """Returns DNS/Nameserver records for the user, optionally filtered by domain."""
+    user_id = extract_user_id(req)
+    try:
+        return db.get_nameservers(user_id, domain)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-def _safe_db(func, *args):
+# Removed _run_scan_sync as execution is now natively async in engine
+
+def _safe_db(func, *args, **kwargs):
     """
     Call a DB function safely — if DB is unavailable, 
     log the error and continue without crashing.
     """
     try:
-        return func(*args)
+        return func(*args, **kwargs)
     except Exception as e:
         print(f"  ⚠️  DB warning: {e}")
         return None
@@ -262,18 +363,18 @@ if __name__ == "__main__":
 
 # ── LOGIN AUDIT ENDPOINT ───────────────────────────────────────
 class LoginAuditRequest(BaseModel):
-    username: str
     event: str = "USER_LOGIN"
 
 @app.post("/api/audit-login", summary="Log user login event")
 async def audit_login(request: LoginAuditRequest, req: Request):
-    """Called by frontend when a user logs in successfully."""
+    """Called by frontend after Supabase Auth login — logs the event with real user_id."""
     client_ip = req.client.host if req.client else "unknown"
+    user_id   = extract_user_id(req)
     _safe_db(
         db.save_audit_log,
-        request.event,
-        None,
-        client_ip,
-        f'User logged in: {request.username}'
+        action=request.event,
+        user_id=user_id,
+        ip_address=client_ip,
+        metadata={'description': f'User login event: {request.event}'}
     )
-    return {"status": "logged"}
+    return {"status": "logged", "user_id": user_id}

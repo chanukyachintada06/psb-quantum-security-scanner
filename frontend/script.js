@@ -1,6 +1,6 @@
 /**
  * ============================================================
- * QUANTUM-SAFE CRYPTOGRAPHY SCANNER — script.js
+ * QUANTUM-SAFE CRYPTOGRAPHY SCANNER â€” script.js
  * Post-Quantum TLS Risk Analyzer
  *
  * Phase 0: SPA Refactor
@@ -10,7 +10,7 @@
 
 'use strict';
 
-// State variables — declared at top to avoid temporal dead zone
+// State variables â€” declared at top to avoid temporal dead zone
 let discoveryTabsInitialized = false;
 let networkGraphInitialized = false;
 let cyberRatingInitialized = false;
@@ -41,7 +41,7 @@ const MOCK_PROFILES = [
       },
       recommendations: [
         { priority: 'high', text: '<strong>Critical:</strong> Migrate from static RSA key exchange to ECDHE. RSA is broken by Shor\'s algorithm on quantum computers.' },
-        { priority: 'high', text: '<strong>Upgrade TLS:</strong> Enforce TLS 1.3+ and disable TLS 1.2 or earlier — older versions lack forward secrecy.' },
+        { priority: 'high', text: '<strong>Upgrade TLS:</strong> Enforce TLS 1.3+ and disable TLS 1.2 or earlier â€” older versions lack forward secrecy.' },
         { priority: 'high', text: '<strong>Deploy Kyber-768</strong> (CRYSTALS-Kyber, FIPS 203) as post-quantum KEM for hybrid key exchange.' },
         { priority: 'medium', text: '<strong>Replace RSA signatures</strong> with ML-DSA (CRYSTALS-Dilithium, FIPS 204) or SLH-DSA (SPHINCS+, FIPS 205).' },
         { priority: 'medium', text: '<strong>Inventory all certificates</strong> with 2048-bit RSA keys. Begin re-issuance with hybrid PQC+classical certificates.' },
@@ -111,8 +111,11 @@ function shouldSimulateFailure(domain) {
 const AppState = {
   currentScan: null,
   scanHistory: [],
+  assetsInventory: [],
+  nameservers: [],
   loadingState: false,
   errorState: null,
+  user: null,
 };
 
 const HomeCharts = {
@@ -241,9 +244,9 @@ function initHomeCharts() {
     HomeCharts.assetType = new Chart(ctxType, {
       type: 'doughnut',
       data: {
-        labels: ['Web Apps', 'APIs', 'Servers', 'Load Balancers', 'Other'],
+        labels: ['Web App', 'API', 'Server', 'Load Balancer', 'Other'],
         datasets: [{
-          data: [42, 26, 37, 11, 12],
+          data: [0, 0, 0, 0, 0], // Start at zero for real-time fetch
           backgroundColor: [pnbColors.red, pnbColors.gold, pnbColors.info, pnbColors.success, pnbColors.muted],
           borderWidth: 0,
           cutout: '75%'
@@ -259,7 +262,7 @@ function initHomeCharts() {
           if (typeFilter) {
             typeFilter.value = clicked;
             if (typeof applyHomeFilters === 'function') applyHomeFilters();
-            document.getElementById('homeAssetTableBody')?.closest('.card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            document.getElementById('section-asset-inventory')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }
         },
         onHover: (event, elements) => {
@@ -278,7 +281,7 @@ function initHomeCharts() {
         labels: ['Critical', 'High', 'Medium', 'Low'],
         datasets: [{
           label: 'Assets',
-          data: [14, 28, 45, 41],
+          data: [0, 0, 0, 0],
           backgroundColor: [pnbColors.danger, pnbColors.warning, pnbColors.info, pnbColors.success],
           borderWidth: 0,
           borderRadius: 4
@@ -301,13 +304,13 @@ function initHomeCharts() {
         },
         onClick: (event, elements) => {
           if (!elements.length) return;
-          const labels = ['Critical', 'High', 'Medium', 'Low'];
+          const labels = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
           const clicked = labels[elements[0].index];
           const riskFilter = document.querySelector('.filter-select[data-filter="risk"]');
           if (riskFilter) {
             riskFilter.value = clicked;
             if (typeof applyHomeFilters === 'function') applyHomeFilters();
-            document.getElementById('homeAssetTableBody')?.closest('.card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            document.getElementById('section-asset-inventory')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }
         },
         onHover: (event, elements) => {
@@ -325,7 +328,7 @@ function initHomeCharts() {
       data: {
         labels: ['IPv4', 'IPv6'],
         datasets: [{
-          data: [86, 14],
+          data: [0, 0],
           backgroundColor: [pnbColors.red, pnbColors.info],
           borderWidth: 0,
           cutout: '75%'
@@ -351,30 +354,22 @@ const DOM = {
   scanBtnSpinner: document.getElementById('scanBtnSpinner'),
   scanBtnIcon: document.getElementById('scanBtnIcon'),
   validationMsg: document.getElementById('validationMsg'),
-  riskBadge: document.getElementById('riskBadge'),
-  riskEmptyState: document.getElementById('riskEmptyState'),
-  riskContent: document.getElementById('riskContent'),
-  riskScore: document.getElementById('riskScore'),
-  readinessPct: document.getElementById('readinessPct'),
-  progressFill: document.getElementById('progressFill'),
-  progressLabel: document.getElementById('progressLabel'),
-  progressBar: document.getElementById('progressBar'),
-  riskTarget: document.getElementById('riskTarget'),
   errorBanner: document.getElementById('errorBanner'),
   errorMsg: document.getElementById('errorMsg'),
   errorClose: document.getElementById('errorClose'),
-  tlsGrid: document.getElementById('tlsGrid'),
-  tlsEmptyState: document.getElementById('tlsEmptyState'),
-  tlsLiveBadge: document.getElementById('tlsLiveBadge'),
-  tlsVersion: document.getElementById('tlsVersion'),
-  tlsCipher: document.getElementById('tlsCipher'),
-  tlsKeyExchange: document.getElementById('tlsKeyExchange'),
-  tlsKeyType: document.getElementById('tlsKeyType'),
-  tlsKeySize: document.getElementById('tlsKeySize'),
-  tlsSigHash: document.getElementById('tlsSigHash'),
-  recEmptyState: document.getElementById('recEmptyState'),
-  recList: document.getElementById('recList'),
-  recCount: document.getElementById('recCount'),
+  
+  // New Engine UI components
+  engineResultsContainer: document.getElementById('engineResultsContainer'),
+  engineHndlBadge: document.getElementById('engineHndlBadge'),
+  engineSummaryCard: document.getElementById('engineSummaryCard'),
+  engineDomainName: document.getElementById('engineDomainName'),
+  enginePqcScore: document.getElementById('enginePqcScore'),
+  engineAgilityScore: document.getElementById('engineAgilityScore'),
+  engineRiskLevel: document.getElementById('engineRiskLevel'),
+  engineTopRiskNode: document.getElementById('engineTopRiskNode'),
+  engineNodeTableBody: document.getElementById('engineNodeTableBody'),
+  engineFindingsGrid: document.getElementById('engineFindingsGrid'),
+
   tableEmptyState: document.getElementById('tableEmptyState'),
   tableWrapper: document.getElementById('tableWrapper'),
   historyTableBody: document.getElementById('historyTableBody'),
@@ -396,7 +391,7 @@ function validateInput(value) {
   if (ipv4.test(trimmed)) {
     const parts = trimmed.split('.').map(Number);
     if (parts.every(p => p >= 0 && p <= 255)) return { valid: true, message: '' };
-    return { valid: false, message: 'Invalid IPv4 address — octets must be 0-255.' };
+    return { valid: false, message: 'Invalid IPv4 address â€” octets must be 0-255.' };
   }
 
   // Domain
@@ -461,97 +456,186 @@ function setLoadingState(isLoading) {
    9. RENDER: RISK SUMMARY
    ============================================================ */
 
-function renderRiskSummary(data) {
-  if (!DOM.riskEmptyState || !DOM.riskContent || !DOM.riskBadge) return;
-  setVisible(DOM.riskEmptyState, false);
-  setVisible(DOM.riskContent, true);
-  DOM.riskBadge.textContent = data.riskLevel;
-  DOM.riskBadge.setAttribute('data-level', data.riskLevel);
-  if (DOM.riskScore) DOM.riskScore.textContent = data.riskScore;
-  if (DOM.readinessPct) DOM.readinessPct.textContent = data.readiness;
-  if (DOM.riskTarget) DOM.riskTarget.textContent = data.domain;
+/* ============================================================
+   9. DATA ADAPTER (TRANSFORM ENGINE)
+   ============================================================ */
 
-  // Animate progress bar after paint
-  setTimeout(() => {
-    const pct = data.readiness;
-    if (DOM.progressFill) {
-      DOM.progressFill.style.width = pct + '%';
-      DOM.progressFill.setAttribute('data-level', data.riskLevel);
+function transformScanData(raw) {
+    if (!raw) return null;
+    
+    // Safety normalizations
+    const summary = raw.risk_profile || {};
+    const nodes = Array.isArray(raw.ip_details) ? raw.ip_details : [];
+    const findings = Array.isArray(raw.findings) ? raw.findings : [];
+    
+    // Backward compat for old payloads
+    if (nodes.length === 0 && raw.tls) {
+       nodes.push({
+          ip_address: raw.domain || 'unknown',
+          tls: raw.tls,
+          certificate: raw.certificate || {},
+          is_successful: true
+       });
     }
-    if (DOM.progressBar) DOM.progressBar.setAttribute('aria-valuenow', pct);
-    if (DOM.progressLabel) DOM.progressLabel.textContent = pct + '%';
-  }, 80);
-}
+    
+    // Backward compat for findings
+    if (findings.length === 0 && raw.pqc?.recommendations) {
+        raw.pqc.recommendations.forEach(r => {
+            findings.push({
+                title: 'Legacy Recommendation',
+                description: r.text,
+                severity: r.priority === 'high' ? 'HIGH' : 'MEDIUM'
+            });
+        });
+    }
 
-function resetRiskSummary() {
-  setVisible(DOM.riskEmptyState, true);
-  setVisible(DOM.riskContent, false);
-  DOM.riskBadge.textContent = '—';
-  DOM.riskBadge.setAttribute('data-level', '');
-  DOM.progressFill.style.width = '0%';
-  DOM.progressFill.removeAttribute('data-level');
-  DOM.progressLabel.textContent = '0%';
-  DOM.progressBar.setAttribute('aria-valuenow', 0);
-}
-
-/* ============================================================
-   10. RENDER: TLS DETAILS
-   ============================================================ */
-
-function renderTLSDetails(tls) {
-  setVisible(DOM.tlsEmptyState, false);
-  setVisible(DOM.tlsGrid, true);
-  setVisible(DOM.tlsLiveBadge, true);
-  DOM.tlsVersion.textContent = tls.version;
-  DOM.tlsCipher.textContent = tls.cipherSuite;
-  DOM.tlsKeyExchange.textContent = tls.keyExchange;
-  DOM.tlsKeyType.textContent = tls.publicKeyType;
-  DOM.tlsKeySize.textContent = tls.keySize;
-  DOM.tlsSigHash.textContent = tls.signatureHash;
-}
-
-function resetTLSDetails() {
-  setVisible(DOM.tlsEmptyState, true);
-  setVisible(DOM.tlsGrid, false);
-  setVisible(DOM.tlsLiveBadge, false);
+    return {
+       domain: raw.domain || 'unknown',
+       summary: {
+           pqc_score: summary.pqc_score !== undefined ? summary.pqc_score : (raw.pqc?.risk_score || 0),
+           crypto_agility_score: summary.crypto_agility_score || 0,
+           risk_level: summary.risk_level || raw.pqc?.risk_level || 'UNKNOWN',
+           hndl_risk: summary.hndl_risk === true
+       },
+       nodes: nodes,
+       findings: findings,
+       raw: raw
+    };
 }
 
 /* ============================================================
-   11. RENDER: RECOMMENDATIONS
+   10. RENDER: ENGINE UI (PHASED)
    ============================================================ */
 
-function renderRecommendations(recs) {
-  setVisible(DOM.recEmptyState, false);
-  setVisible(DOM.recList, true);
-  DOM.recCount.textContent = recs.length + ' item' + (recs.length !== 1 ? 's' : '');
-  setVisible(DOM.recCount, true);
-  DOM.recList.innerHTML = '';
-
-  recs.forEach((rec, idx) => {
-    const li = document.createElement('li');
-    li.className = 'rec-item';
-    li.style.animationDelay = (idx * 60) + 'ms';
-
-    const bullet = document.createElement('span');
-    bullet.className = 'rec-bullet priority-' + rec.priority;
-    bullet.textContent = rec.priority === 'high' ? 'H' : rec.priority === 'medium' ? 'M' : 'L';
-    bullet.title = 'Priority: ' + rec.priority;
-
-    const text = document.createElement('span');
-    text.className = 'rec-text';
-    text.innerHTML = rec.text;
-
-    li.appendChild(bullet);
-    li.appendChild(text);
-    DOM.recList.appendChild(li);
-  });
+function renderEngineSummary(data) {
+   DOM.engineDomainName.textContent = data.domain;
+   DOM.enginePqcScore.textContent = data.summary.pqc_score;
+   DOM.engineAgilityScore.textContent = data.summary.crypto_agility_score;
+   
+   DOM.engineRiskLevel.textContent = data.summary.risk_level;
+   DOM.engineRiskLevel.style.color = 'var(--pnb-text)';
+   if(data.summary.risk_level === 'CRITICAL' || data.summary.risk_level === 'HIGH') DOM.engineRiskLevel.style.color = 'var(--pnb-red)';
+   
+   // HNDL Risk Badge
+   if (data.summary.hndl_risk) {
+       DOM.engineHndlBadge.style.display = 'flex';
+   } else {
+       DOM.engineHndlBadge.style.display = 'none';
+   }
+   
+   // Top Risk Node Calculation
+   let topRiskNode = null;
+   if (data.nodes && data.nodes.length > 0) {
+       const failed = data.nodes.find(n => !n.is_successful);
+       topRiskNode = failed ? failed : data.nodes[0];
+   }
+   
+   if (topRiskNode && topRiskNode.ip_address) {
+       DOM.engineTopRiskNode.textContent = `Highest Risk Node: ${topRiskNode.ip_address} `;
+       if (!topRiskNode.is_successful) {
+           DOM.engineTopRiskNode.textContent += '(ERROR)';
+           DOM.engineTopRiskNode.style.color = 'var(--pnb-red)';
+       } else {
+           DOM.engineTopRiskNode.textContent += `(ANALYZED)`;
+           DOM.engineTopRiskNode.style.color = 'var(--pnb-text-muted)';
+       }
+   } else {
+       DOM.engineTopRiskNode.textContent = '';
+   }
 }
 
-function resetRecommendations() {
-  setVisible(DOM.recEmptyState, true);
-  setVisible(DOM.recList, false);
-  setVisible(DOM.recCount, false);
-  DOM.recList.innerHTML = '';
+function renderEngineNodes(data) {
+   DOM.engineNodeTableBody.innerHTML = '';
+   if (!data.nodes || data.nodes.length === 0) {
+      DOM.engineNodeTableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 24px; color:var(--pnb-text-muted);">No endpoints discovered.</td></tr>`;
+      return;
+   }
+   
+   data.nodes.forEach(node => {
+      const isFailed = node.is_successful === false;
+      const tls = node.tls || {};
+      const cert = node.certificate || {};
+      
+      const trMain = document.createElement('tr');
+      trMain.className = 'node-row';
+      trMain.innerHTML = `
+         <td class="mono" style="font-weight:600;">${node.ip_address || 'unknown'}</td>
+         <td class="mono" style="color:var(--pnb-text-muted);">${tls.version || '—'}</td>
+         <td class="mono" style="color:var(--pnb-text-muted);">${tls.public_key_type || '—'}</td>
+         <td style="font-weight:600; color:var(--pnb-${isFailed ? 'danger' : 'text'})">${isFailed ? 'FAILED' : 'RESOLVED'}</td>
+         <td>
+             <span class="finding-badge ${isFailed ? 'badge-critical' : 'badge-low'}">
+                 ${isFailed ? 'ERROR' : 'SUCCESS'}
+             </span>
+         </td>
+      `;
+      
+      const trDetails = document.createElement('tr');
+      trDetails.className = 'node-details-row';
+      trDetails.innerHTML = `
+         <td colspan="5" style="padding:0;">
+             <div class="node-details-container">
+                 <div class="node-detail-group">
+                     <span class="node-detail-label">Cipher Suite</span>
+                     <span class="node-detail-value">${tls.cipher_suite || '—'}</span>
+                 </div>
+                 <div class="node-detail-group">
+                     <span class="node-detail-label">Key Exchange</span>
+                     <span class="node-detail-value">${tls.key_exchange || '—'}</span>
+                 </div>
+                 <div class="node-detail-group">
+                     <span class="node-detail-label">Cert Status</span>
+                     <span class="node-detail-value" style="color:var(--pnb-${cert.chain_status === 'VALID' ? 'success' : 'danger'})">
+                         ${cert.chain_status || 'UNKNOWN'}
+                     </span>
+                 </div>
+             </div>
+         </td>
+      `;
+      
+      trMain.addEventListener('click', () => {
+          trDetails.classList.toggle('expanded');
+      });
+      
+      DOM.engineNodeTableBody.appendChild(trMain);
+      DOM.engineNodeTableBody.appendChild(trDetails);
+   });
+}
+
+function renderEngineFindings(data) {
+   DOM.engineFindingsGrid.innerHTML = '';
+   if (!data.findings || data.findings.length === 0) {
+      DOM.engineFindingsGrid.innerHTML = `<div style="color:var(--pnb-text-muted); font-size:0.9rem; padding:16px;">No misconfigurations or recommendations flagged.</div>`;
+      return;
+   }
+   
+   data.findings.forEach(f => {
+      const card = document.createElement('div');
+      card.className = 'finding-card';
+      const sev = f.severity ? f.severity.toUpperCase() : 'LOW';
+      card.setAttribute('data-severity', sev);
+      
+      let badgeClass = 'badge-low';
+      if(sev === 'CRITICAL') badgeClass = 'badge-critical';
+      if(sev === 'HIGH') badgeClass = 'badge-high';
+      if(sev === 'MEDIUM') badgeClass = 'badge-medium';
+      
+      card.innerHTML = `
+          <div class="finding-header">
+              <span class="finding-title">${f.title || 'Security Notice'}</span>
+              <span class="finding-badge ${badgeClass}">${sev}</span>
+          </div>
+          <div class="finding-desc">${f.description || ''}</div>
+      `;
+      DOM.engineFindingsGrid.appendChild(card);
+   });
+}
+
+function clearEngineUI() {
+    DOM.engineResultsContainer.style.display = 'none';
+    DOM.engineSummaryCard.style.opacity = '0';
+    DOM.engineNodeTableBody.innerHTML = '';
+    DOM.engineFindingsGrid.innerHTML = '';
 }
 
 /* ============================================================
@@ -637,9 +721,9 @@ function appendToHistory(data) {
     const item = document.createElement('div');
     item.className = 'activity-item activity-new';
     item.innerHTML = `
-      <span class="activity-icon">✅</span>
+      <span class="activity-icon">âœ…</span>
       <span class="activity-text">Scan completed: 
-        <strong>${data.domain}</strong> — 
+        <strong>${data.domain}</strong> â€” 
         Risk: ${data.riskLevel}</span>
       <span class="activity-time">just now</span>
     `;
@@ -653,6 +737,333 @@ function appendToHistory(data) {
 function clearHistory() {
   AppState.scanHistory = [];
   renderHistoryTable();
+}
+
+/* ============================================================
+   12B. ASSETS & NAMESERVERS ENGINE
+   ============================================================ */
+
+async function fetchAssetsFromSupabase() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/assets`, {
+      headers: typeof authHeaders === 'function' ? authHeaders() : {}
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    AppState.assetsInventory = data.assets || [];
+    renderAssetsTable();
+    // Also update asset discovery if on that page
+    if (Router.currentSection === 'asset-discovery') renderAssetDiscovery();
+  } catch (err) {
+    console.warn('Failed to fetch assets:', err);
+  }
+}
+
+function renderAssetDiscovery() {
+  const assets = AppState.assetsInventory;
+  
+  // 1. Domains Tab
+  const domainsTbody = document.querySelector('#tab-domains tbody');
+  if (domainsTbody) {
+    const domains = assets.filter(a => ['Web App', 'API', 'Gateway'].includes(a.asset_type));
+    domainsTbody.innerHTML = domains.map(a => `
+      <tr>
+        <td class="td-dim">${new Date(a.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+        <td class="td-strong">${a.name}</td>
+        <td class="td-dim">${a.registration_date || '—'}</td>
+        <td>${a.registrar || '—'}</td>
+        <td>${a.owner_department || 'PNB'}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="5" style="text-align:center; padding: 20px;">No domains found.</td></tr>';
+    
+    // Update badge count
+    const domainBadge = document.querySelector('.tab-button[data-tab="tab-domains"] .tab-badge');
+    if (domainBadge) domainBadge.textContent = domains.length;
+  }
+
+  // 2. SSL Tab
+  const sslTbody = document.querySelector('#tab-ssl tbody');
+  if (sslTbody) {
+    const sslAssets = assets.filter(a => a.cert_status);
+    sslTbody.innerHTML = sslAssets.map(a => `
+      <tr>
+        <td class="td-dim">${new Date(a.updated_at || a.created_at).toLocaleDateString('en-GB')}</td>
+        <td><span class="mono sha-fingerprint" title="${a.ssl_fingerprint || 'N/A'}">${(a.ssl_fingerprint || 'N/A').substring(0, 16)}...</span></td>
+        <td class="td-dim">${a.cert_valid_from || '—'}</td>
+        <td class="td-strong">${a.name}</td>
+        <td>${a.owner_department || 'PNB'}</td>
+        <td>${a.ca_name || 'DigiCert'}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="6" style="text-align:center; padding: 20px;">No SSL data found.</td></tr>';
+    
+    const sslBadge = document.querySelector('.tab-button[data-tab="tab-ssl"] .tab-badge');
+    if (sslBadge) sslBadge.textContent = sslAssets.length;
+  }
+
+  // 3. IPs Tab
+  const ipsTbody = document.querySelector('#tab-ips tbody');
+  if (ipsTbody) {
+    const ipAssets = assets.filter(a => a.ipv4 || a.ipv6);
+    ipsTbody.innerHTML = ipAssets.map(a => `
+      <tr>
+        <td class="td-dim">${new Date(a.created_at).toLocaleDateString('en-GB')}</td>
+        <td class="td-strong">${a.ipv4 || a.ipv6}</td>
+        <td>${a.ipv4 ? 'IPv4' : 'IPv6'}</td>
+        <td><span class="td-risk-pill ${a.risk_level}">${a.risk_level}</span></td>
+        <td>${a.owner_department || 'Infra'}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="5" style="text-align:center; padding: 20px;">No IP assets found.</td></tr>';
+    
+    const ipBadge = document.querySelector('.tab-button[data-tab="tab-ips"] .tab-badge');
+    if (ipBadge) ipBadge.textContent = ipAssets.length;
+  }
+}
+
+let currentEditingAssetId = null;
+
+function renderAssetsTable() {
+  const tbody = document.getElementById('homeAssetTableBody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (AppState.assetsInventory.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding: 40px; color: var(--pnb-text-muted);">No assets found in inventory.</td></tr>';
+    return;
+  }
+  AppState.assetsInventory.forEach(asset => {
+    const tr = document.createElement('tr');
+    const createdDate = asset.created_at ? new Date(asset.created_at).toLocaleDateString() : '—';
+    const scanDate = asset.last_scan_at ? new Date(asset.last_scan_at).toLocaleDateString() : 'Never';
+    
+    tr.innerHTML = `
+      <td class="td-strong">${asset.name}</td>
+      <td><a href="${asset.url}" class="td-link" target="_blank">${asset.url}</a></td>
+      <td>${asset.asset_type || '—'}</td>
+      <td>${asset.owner_department || '—'}</td>
+      <td><span class="td-risk-pill ${asset.risk_level || 'LOW'}">${asset.risk_level || 'LOW'}</span></td>
+      <td><span class="td-status-text ${asset.cert_status === 'Valid' ? 'color-success' : 'color-danger'}">${asset.cert_status || 'Valid'}</span></td>
+      <td class="td-dim" style="font-size:0.751rem; line-height: 1.2">${createdDate}<br/><span style="opacity:0.7">by ${asset.created_by || 'system'}</span></td>
+      <td class="td-dim" style="font-size:0.751rem; line-height: 1.2">${scanDate}<br/><span style="opacity:0.7">${asset.last_scan_by ? 'by ' + asset.last_scan_by : ''}</span></td>
+      <td style="text-align: center">
+        <div style="display:flex; gap: 8px; justify-content: center">
+          <button class="action-btn-icon" onclick="editAsset('${asset.id}')" title="Edit">✏️</button>
+          <button class="action-btn-icon delete" onclick="deleteAsset('${asset.id}', '${asset.name}')" title="Delete">🗑️</button>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+window.deleteAsset = async function(id, name) {
+  if (!confirm(`Are you sure you want to delete asset "${name}"?`)) return;
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/assets/${id}`, {
+      method: "DELETE",
+      headers: typeof authHeaders === "function" ? authHeaders() : {}
+    });
+    if (response.ok) {
+       fetchAssetsFromSupabase();
+       if (typeof fetchAuditLogs === "function") fetchAuditLogs();
+    } else {
+       alert("Failed to delete asset.");
+    }
+  } catch(e) { console.error(e); }
+};
+
+window.editAsset = function(id) {
+  const asset = AppState.assetsInventory.find(a => a.id === id);
+  if (!asset) return;
+  
+  currentEditingAssetId = id;
+  const modal = document.getElementById('addAssetModal');
+  if (!modal) return;
+  
+  modal.querySelector('h3').textContent = 'Edit Asset';
+  document.getElementById('confirmAddAsset').textContent = 'Update Asset';
+  
+  if (document.getElementById('newAssetName')) document.getElementById('newAssetName').value = asset.name || '';
+  if (document.getElementById('newAssetUrl')) document.getElementById('newAssetUrl').value = asset.url || '';
+  if (document.getElementById('newAssetType')) document.getElementById('newAssetType').value = asset.asset_type || 'Web App';
+  if (document.getElementById('newAssetOwner')) document.getElementById('newAssetOwner').value = asset.owner_department || 'IT';
+  
+  modal.style.display = 'flex';
+};
+
+async function fetchNameservers(domain = null) {
+  try {
+    const url = domain ? `${API_BASE_URL}/api/nameservers?domain=${domain}` : `${API_BASE_URL}/api/nameservers`;
+    const response = await fetch(url, {
+      headers: typeof authHeaders === 'function' ? authHeaders() : {}
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    AppState.nameservers = data;
+    renderNameserverTable();
+  } catch (err) {
+    console.warn('Nameserver fetch error:', err);
+  }
+}
+
+function renderNameserverTable() {
+  const tbody = document.getElementById('nameserverTableBody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (AppState.nameservers.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px; color: var(--pnb-text-muted);">No records found.</td></tr>';
+    return;
+  }
+  AppState.nameservers.forEach(ns => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="td-strong">${ns.hostname}</td>
+      <td>${ns.record_type}</td>
+      <td class="mono">${ns.ipv4 || '—'}</td>
+      <td class="mono">${ns.ipv6 || '—'}</td>
+      <td class="mono">${ns.ttl || '—'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function fetchAuditLogs() {
+  const feed = document.getElementById('homeActivityFeed');
+  if (!feed) return;
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/audit`, {
+      headers: typeof authHeaders === "function" ? authHeaders() : {}
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    renderActivityFeed(data.audit_logs || []);
+  } catch (err) {
+    console.warn("Failed to fetch audit logs:", err);
+  }
+}
+
+function renderActivityFeed(logs) {
+  const feed = document.getElementById("homeActivityFeed");
+  if (!feed) return;
+  feed.innerHTML = "";
+  if (logs.length === 0) {
+    feed.innerHTML = '<div class="activity-item" style="justify-content: center; opacity: 0.6; padding: 10px;">No recent activity.</div>';
+    return;
+  }
+  
+  const iconMap = {
+    "SCAN_COMPLETED": "✅",
+    "SCAN_FAILED":    "❌",
+    "SCAN_INITIATED": "🔍",
+    "USER_LOGIN":     "👤",
+    "SYSTEM_STARTUP": "⚙️",
+  };
+
+  logs.slice(0, 10).forEach(log => {
+    const item = document.createElement("div");
+    item.className = "activity-item";
+    const timeStr = formatRelativeTime(new Date(log.created_at));
+    const icon = iconMap[log.action] || "📝";
+    let text = log.action.replace(/_/g, " ");
+    if (log.domain) text += `: ${log.domain}`;
+    
+    item.innerHTML = `
+      <span class="activity-icon">${icon}</span>
+      <span class="activity-text" style="font-size:0.82rem; flex:1">${text}</span>
+      <span class="activity-time td-dim" style="font-size:0.75rem">${timeStr}</span>
+    `;
+    feed.appendChild(item);
+  });
+}
+
+function formatRelativeTime(date) {
+  const now = new Date();
+  const diffInSecs = Math.floor((now - date) / 1000);
+  if (diffInSecs < 60) return "just now";
+  const diffInMins = Math.floor(diffInSecs / 60);
+  if (diffInMins < 60) return `${diffInMins}m ago`;
+  const diffInHours = Math.floor(diffInMins / 60);
+  if (diffInHours < 24) return `${diffInHours}h ago`;
+  return date.toLocaleDateString();
+}
+
+/* ============================================================
+   12C. DASHBOARD ANALYTICS ENGINE
+   ============================================================ */
+
+async function fetchDashboardStats() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/stats`, {
+      headers: typeof authHeaders === 'function' ? authHeaders() : {}
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    updateDashboardStatsUI(data);
+  } catch (err) {
+    console.warn('[Dashboard] Stats fetch error:', err);
+  }
+}
+
+function updateDashboardStatsUI(data) {
+  if (!data) return;
+
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val !== undefined ? val : 0;
+  };
+
+  // Update Stat Cards (with safe fallbacks)
+  setVal('stat-total-assets', data.total_assets);
+  setVal('stat-web-apps', data.count_by_asset_type?.['Web App']);
+  setVal('stat-apis', data.count_by_asset_type?.['API']);
+  setVal('stat-high-risk', data.high_risk_assets_count);
+  setVal('stat-ipv4', data.ipv4_count);
+  setVal('stat-ipv6', data.ipv6_count);
+
+  // Update "Last Updated" timestamp
+  const timeEl = document.getElementById('lastUpdatedTime');
+  if (timeEl) {
+    timeEl.textContent = new Date().toLocaleTimeString('en-IN', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    });
+  }
+
+  // Handle Charts Update
+  if (HomeCharts.assetType && data.count_by_asset_type) {
+    HomeCharts.assetType.data.datasets[0].data = [
+      data.count_by_asset_type['Web App'] || 0,
+      data.count_by_asset_type['API'] || 0,
+      data.count_by_asset_type['Server'] || 0,
+      data.count_by_asset_type['Load Balancer'] || 0,
+      data.count_by_asset_type['Other'] || 0
+    ];
+    HomeCharts.assetType.update();
+  }
+
+  if (HomeCharts.assetRisk && data.count_by_risk_level) {
+    HomeCharts.assetRisk.data.datasets[0].data = [
+      data.count_by_risk_level['CRITICAL'] || 0,
+      data.count_by_risk_level['HIGH'] || 0,
+      data.count_by_risk_level['MEDIUM'] || 0,
+      data.count_by_risk_level['LOW'] || 0
+    ];
+    HomeCharts.assetRisk.update();
+  }
+
+  if (HomeCharts.ipVersion) {
+    HomeCharts.ipVersion.data.datasets[0].data = [
+      data.ipv4_count || 0,
+      data.ipv6_count || 0
+    ];
+    HomeCharts.ipVersion.update();
+  }
+
+  // Handle Empty State UX
+  const chartGrids = document.querySelectorAll('.chart-grid');
+  if (data.total_assets === 0) {
+    chartGrids.forEach(grid => grid.style.opacity = '0.35');
+  } else {
+    chartGrids.forEach(grid => grid.style.opacity = '1');
+  }
 }
 
 /* ============================================================
@@ -698,92 +1109,78 @@ async function handleScan() {
 
   setLoadingState(true);
   AppState.errorState = null;
-  resetRiskSummary();
-  resetTLSDetails();
-  resetRecommendations();
+  clearEngineUI();
 
   try {
-    let scanData;
+    let rawApiResponse;
 
     try {
       // Call real backend
       const response = await fetch(`${API_BASE_URL}/api/scan`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: Object.assign({ 'Content-Type': 'application/json' }, typeof authHeaders === 'function' ? authHeaders() : {}),
         body: JSON.stringify({ domain }),
         signal: AbortSignal.timeout(25000)
       });
 
       if (!response.ok) {
-        const err = await response.json().catch(() => ({
-          detail: 'Scan failed'
-        }));
+        const err = await response.json().catch(() => ({ detail: 'Scan failed' }));
         throw new Error(err.detail || `Server error ${response.status}`);
       }
 
-      const raw = await response.json();
-
-      // Map API response to frontend format
-      scanData = {
-        domain: raw.domain,
-        riskLevel: raw.pqc.risk_level,
-        riskScore: raw.pqc.risk_score,
-        readiness: raw.pqc.pqc_readiness,
-        tls: {
-          version: raw.tls.version,
-          cipherSuite: raw.tls.cipher_suite,
-          keyExchange: raw.tls.key_exchange,
-          publicKeyType: raw.tls.public_key_type,
-          keySize: raw.tls.key_size,
-          signatureHash: raw.tls.signature_hash,
-        },
-        recommendations: raw.pqc.recommendations
-      };
-
+      rawApiResponse = await response.json();
       setDemoMode(false);
 
     } catch (fetchErr) {
-      // If backend is offline, fall back to mock data silently
-      const isNetworkError = (
-        fetchErr.name === 'TypeError' ||
-        fetchErr.name === 'AbortError' ||
-        String(fetchErr).includes('fetch')
-      );
-
+      // If backend is offline, fall back to mock data
+      const isNetworkError = (fetchErr.name === 'TypeError' || fetchErr.name === 'AbortError' || String(fetchErr).includes('fetch'));
       if (isNetworkError) {
         setDemoMode(true);
         await sleep(1200 + Math.random() * 800);
         if (shouldSimulateFailure(domain)) {
-          throw new Error(
-            'Connection refused: Unable to reach ' + domain +
-            '. The host may be offline or blocking TLS probes.'
-          );
+          throw new Error('Connection refused: Unable to reach ' + domain);
         }
-        scanData = getMockScanData(domain);
+        rawApiResponse = getMockScanData(domain);
       } else {
         setDemoMode(false);
         throw fetchErr;
       }
     }
 
-    AppState.currentScan = scanData;
-    renderRiskSummary(scanData);
-    renderTLSDetails(scanData.tls);
-    renderRecommendations(scanData.recommendations);
-    appendToHistory(scanData);
-    setStatus(
-      `Scan complete — ${domain}${demoMode ? ' (demo)' : ''}`,
-      'ready'
-    );
+    // 1. Adapter: Transform Data
+    const engineData = transformScanData(rawApiResponse);
+    AppState.currentScan = engineData;
+    
+    // 2. Phased Rendering
+    DOM.engineResultsContainer.style.display = 'flex';
+    
+    // Phase A: Summary displays immediately
+    renderEngineSummary(engineData);
+    DOM.engineSummaryCard.style.opacity = '1';
+    
+    // Phase B & C: Nodes and Findings flow sequentially
+    setTimeout(() => {
+        renderEngineNodes(engineData);
+        renderEngineFindings(engineData);
+    }, 150);
+
+    // Legacy Fallback mapping for history appending
+    const legacyHistoryObj = {
+        domain: engineData.domain,
+        riskLevel: engineData.summary.risk_level,
+        riskScore: engineData.summary.pqc_score,
+        timestamp: new Date()
+    };
+    appendToHistory(legacyHistoryObj);
+    
+    setStatus(`Engine Sequence Complete — ${domain}${demoMode ? ' (demo)' : ''}`, 'ready');
 
   } catch (err) {
     AppState.errorState = err.message;
     AppState.currentScan = null;
     showErrorBanner(err.message);
     setStatus('Scan failed', 'error');
-    resetRiskSummary();
-    resetTLSDetails();
-    resetRecommendations();
+    clearEngineUI();
     setTimeout(() => {
       setStatus('System Ready', 'ready');
       AppState.errorState = null;
@@ -791,6 +1188,9 @@ async function handleScan() {
 
   } finally {
     setLoadingState(false);
+    if (typeof refreshDashboardData === 'function') {
+      setTimeout(refreshDashboardData, 1500);
+    }
   }
 }
 
@@ -831,9 +1231,7 @@ function init() {
   initHomeFeatures();
 
   // Reset states
-  resetRiskSummary();
-  resetTLSDetails();
-  resetRecommendations();
+  clearEngineUI();
   renderHistoryTable();
   hideErrorBanner();
   setStatus('System Ready', 'ready');
@@ -882,7 +1280,7 @@ function init() {
     'background:#C41230;color:white;font-weight:bold;padding:4px 8px;border-radius:4px');
   console.log('%c Team CypherRed261 | PSB Hackathon 2026 | LPU ',
     'background:#F5A623;color:#0D0D0F;font-weight:bold;padding:4px 8px;border-radius:4px');
-  console.log('%c All 7 modules initialized successfully ✓ ',
+  console.log('%c All 7 modules initialized successfully âœ“ ',
     'background:#22C55E;color:white;font-weight:bold;padding:4px 8px;border-radius:4px');
 }
 
@@ -1097,6 +1495,85 @@ const centerTextPlugin = {
     ctx.restore();
   }
 };
+async function fetchCBOMData() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/cbom`, {
+      headers: typeof authHeaders === 'function' ? authHeaders() : {}
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    const records = data.cbom_records || [];
+    
+    // 1. Update stats cards
+    const totalApps = new Set(records.map(r => r.scan_results?.domain)).size;
+    const activeCerts = records.filter(r => r.nist_standard).length;
+    const weakCrypto = records.filter(r => r.pqc_status === 'VULNERABLE').length;
+
+    updateStat('.cbom-stats-row .stat-card:nth-child(1) .stat-value', totalApps || 0);
+    updateStat('.cbom-stats-row .stat-card:nth-child(3) .stat-value', activeCerts || 0);
+    updateStat('.cbom-stats-row .stat-card:nth-child(4) .stat-value', weakCrypto || 0);
+
+    // 2. Update Table
+    const tbody = document.querySelector('.cbom-cipher-table tbody');
+    if (tbody) {
+      tbody.innerHTML = records.slice(0, 10).map(r => `
+        <tr class="${r.pqc_status === 'VULNERABLE' ? 'cipher-row-danger' : ''}">
+          <td class="td-strong">${r.scan_results?.domain || '—'}</td>
+          <td class="cipher-col-mono">${r.key_length || '—'}</td>
+          <td class="cipher-col-mono" ${r.pqc_status === 'VULNERABLE' ? 'style="color: #EF4444;"' : ''}>${r.cipher_suite || '—'}</td>
+          <td>${r.nist_standard || 'N/A'}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="4" style="text-align:center; padding: 20px;">No CBOM records found.</td></tr>';
+    }
+
+    // 3. Update Charts
+    updateCBOMCharts(records);
+    
+  } catch (err) {
+    console.warn('Failed to fetch CBOM data:', err);
+  }
+}
+
+function updateStat(selector, value) {
+  const el = document.querySelector(selector);
+  if (el) el.textContent = value;
+}
+
+function updateCBOMCharts(records) {
+  if (!CbomCharts.keyLength) return;
+
+  // Key Length Aggregation
+  const keyLengths = records.reduce((acc, r) => {
+    const kl = r.key_length || 'Unknown';
+    acc[kl] = (acc[kl] || 0) + 1;
+    return acc;
+  }, {});
+  CbomCharts.keyLength.data.labels = Object.keys(keyLengths);
+  CbomCharts.keyLength.data.datasets[0].data = Object.values(keyLengths);
+  CbomCharts.keyLength.update();
+
+  // Cipher Usage Aggregation
+  const ciphers = records.reduce((acc, r) => {
+    const c = r.cipher_suite || 'Unknown';
+    acc[c] = (acc[c] || 0) + 1;
+    return acc;
+  }, {});
+  const sortedCiphers = Object.entries(ciphers).sort((a,b) => b[1] - a[1]).slice(0, 5);
+  CbomCharts.cipherUsage.data.labels = sortedCiphers.map(e => e[0]);
+  CbomCharts.cipherUsage.data.datasets[0].data = sortedCiphers.map(e => e[1]);
+  CbomCharts.cipherUsage.update();
+  
+  // Protocols Aggregation (simulated if missing from CBOM record directly, using cipher names)
+  const protocols = records.reduce((acc, r) => {
+     // rudimentary check
+     const p = r.cipher_suite?.includes('TLS13') || r.cipher_suite?.includes('AES_GCM') ? 'TLS 1.3' : 'TLS 1.2';
+     acc[p] = (acc[p] || 0) + 1;
+     return acc;
+  }, {});
+  CbomCharts.encryptionProtocols.data.datasets[0].data = [protocols['TLS 1.3'] || 0, protocols['TLS 1.2'] || 0, 0];
+  CbomCharts.encryptionProtocols.update();
+}
+
 function initCbomCharts() {
   if (CbomCharts.keyLength) {
     const canvas = document.getElementById('chartKeyLength');
@@ -1108,6 +1585,9 @@ function initCbomCharts() {
     CbomCharts.encryptionProtocols = null;
   }
   Chart.register(centerTextPlugin);
+  
+  // Fetch real data after creating chart skeletons
+  setTimeout(() => fetchCBOMData(), 200);
 
   const pnbColors = {
     red: '#C41230',
@@ -1423,8 +1903,8 @@ function showReportToast(type) {
   const toast = document.getElementById('reportToast');
   if (!toast) return;
   toast.textContent = type === 'scheduled'
-    ? '✅ Report scheduled successfully!'
-    : '✅ Report generated successfully!';
+    ? 'âœ… Report scheduled successfully!'
+    : 'âœ… Report generated successfully!';
   toast.style.display = 'block';
   toast.style.animation = 'slideUp 0.3s ease';
   setTimeout(() => { toast.style.display = 'none'; }, 3000);
@@ -1478,7 +1958,7 @@ function initHomeFeatures() {
         this.disabled = false;
         const toast = document.getElementById('reportToast');
         if (toast) {
-          toast.textContent = '✅ DNS resolved successfully for company.com';
+          toast.textContent = 'âœ… DNS resolved successfully for company.com';
           toast.style.display = 'block';
           setTimeout(() => { toast.style.display = 'none'; }, 3000);
         }
@@ -1491,53 +1971,126 @@ function initHomeFeatures() {
   if (addAssetBtn) {
     addAssetBtn.addEventListener('click', () => {
       const modal = document.getElementById('addAssetModal');
-      if (modal) modal.style.display = 'flex';
+      if (modal) {
+        currentEditingAssetId = null; 
+        modal.querySelector('h3').textContent = 'Add New Asset';
+        document.getElementById('confirmAddAsset').textContent = 'Add Asset';
+        // Clear fields
+        if (document.getElementById('newAssetName')) document.getElementById('newAssetName').value = '';
+        if (document.getElementById('newAssetUrl')) document.getElementById('newAssetUrl').value = '';
+        modal.style.display = 'flex';
+      }
     });
   }
   ['closeAssetModal', 'cancelAssetModal'].forEach(id => {
     const btn = document.getElementById(id);
     if (btn) btn.addEventListener('click', () => {
       document.getElementById('addAssetModal').style.display = 'none';
+      currentEditingAssetId = null;
     });
   });
   const confirmAdd = document.getElementById('confirmAddAsset');
   if (confirmAdd) {
-    confirmAdd.addEventListener('click', () => {
+    confirmAdd.addEventListener('click', async () => {
       const name = document.getElementById('newAssetName')?.value.trim();
       const url = document.getElementById('newAssetUrl')?.value.trim();
       const type = document.getElementById('newAssetType')?.value;
       const owner = document.getElementById('newAssetOwner')?.value;
-      if (!name) return;
-      const tbody = document.getElementById('homeAssetTableBody');
-      if (tbody) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td class="td-domain">${name}</td><td><a href="${url}" style="color:var(--pnb-info);font-size:0.78rem">${url || '—'}</a></td><td class="mono" style="font-size:0.75rem">—</td><td class="mono" style="font-size:0.75rem">—</td><td>${type}</td><td>${owner}</td><td><span class="td-risk-pill LOW">LOW</span></td><td style="color:var(--pnb-success);font-size:0.78rem">Valid</td><td class="mono" style="font-size:0.75rem">—</td><td style="color:var(--pnb-text-dim);font-size:0.72rem">just now</td>`;
-        tbody.prepend(tr);
+      if (!name || !url) {
+        alert('Asset Name and URL are required');
+        return;
       }
-      document.getElementById('addAssetModal').style.display = 'none';
-      if (document.getElementById('newAssetName')) document.getElementById('newAssetName').value = '';
-      if (document.getElementById('newAssetUrl')) document.getElementById('newAssetUrl').value = '';
+
+      confirmAdd.disabled = true;
+      confirmAdd.textContent = currentEditingAssetId ? 'Updating...' : 'Adding...';
+
+      const method = currentEditingAssetId ? 'PUT' : 'POST';
+      const endpoint = currentEditingAssetId ? `${API_BASE_URL}/api/assets/${currentEditingAssetId}` : `${API_BASE_URL}/api/assets`;
+
+      try {
+        const response = await fetch(endpoint, {
+          method,
+          headers: Object.assign({ 'Content-Type': 'application/json' }, typeof authHeaders === 'function' ? authHeaders() : {}),
+          body: JSON.stringify({ 
+             name, 
+             url, 
+             asset_type: type, 
+             owner_department: owner 
+          })
+        });
+
+        if (response.ok) {
+           document.getElementById('addAssetModal').style.display = 'none';
+           // Reset form
+           document.getElementById('newAssetName').value = '';
+           document.getElementById('newAssetUrl').value = '';
+           currentEditingAssetId = null;
+           fetchAssetsFromSupabase();
+           if (typeof fetchAuditLogs === "function") fetchAuditLogs();
+        } else {
+           const err = await response.json();
+           alert('Operation failed: ' + (err.detail || 'Unknown error'));
+        }
+      } catch (err) {
+        console.error('Error:', err);
+      } finally {
+        confirmAdd.disabled = false;
+        confirmAdd.textContent = currentEditingAssetId ? 'Update Asset' : 'Add Asset';
+      }
     });
   }
 
   // Scan All
   const scanAllBtn = document.querySelector('[data-action="scan-all"]');
   if (scanAllBtn) {
-    scanAllBtn.addEventListener('click', function () {
+    scanAllBtn.addEventListener('click', async function () {
+      if (AppState.assetsInventory.length === 0) {
+        alert('No assets found in inventory to scan.');
+        return;
+      }
+      
       this.disabled = true;
-      this.innerHTML = '<span class="scan-btn-spinner"></span> Scanning...';
+      this.innerHTML = '<span class="scan-btn-spinner"></span> Scanning All...';
+      
+      let completed = 0;
+      const total = AppState.assetsInventory.length;
+      
+      // Sequential scan for progress stability
+      for (const asset of AppState.assetsInventory) {
+        try {
+          let domain = asset.url;
+          if (domain.includes("://")) {
+            domain = new URL(domain).hostname;
+          }
+          
+          this.innerHTML = `<span class="scan-btn-spinner"></span> Scanning (${completed + 1}/${total})...`;
+          
+          await fetch(`${API_BASE_URL}/api/scan/${domain}`, {
+            headers: typeof authHeaders === "function" ? authHeaders() : {}
+          });
+          
+          completed++;
+        } catch (err) {
+          console.warn("Scan all error:", asset.url, err);
+        }
+      }
+      
+      this.innerHTML = '✅ Scan Completed!';
+      
+      refreshDashboardData();
+      
+      const toast = document.getElementById('reportToast');
+      if (toast) {
+        toast.textContent = `Successfully scanned ${completed} assets!`;
+        toast.style.display = 'block';
+        setTimeout(() => { toast.style.display = 'none'; }, 3000);
+      }
+
+      // Return to original state after 5 seconds
       setTimeout(() => {
         this.disabled = false;
-        this.innerHTML = 'Scan All ›';
-        const el = document.getElementById('lastUpdatedTime');
-        if (el) el.textContent = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-        const toast = document.getElementById('reportToast');
-        if (toast) {
-          toast.textContent = '✅ All 128 assets scanned successfully!';
-          toast.style.display = 'block';
-          setTimeout(() => { toast.style.display = 'none'; }, 3000);
-        }
-      }, 2000);
+        this.innerHTML = 'Scan All';
+      }, 5000);
     });
   }
 
@@ -1582,34 +2135,40 @@ function initHomeFeatures() {
 }
 
 /* ============================================================
-   LOGIN SYSTEM — Quantum-Proof Systems Scanner
+   SUPABASE AUTH SYSTEM â€” Quantum-Proof Systems Scanner
    Team CypherRed261 | PSB Hackathon 2026
    ============================================================ */
 
-const AUTHORIZED_USERS = {
-  'judge01':  'pnb@123',
-  'judge02':  'pnb@123',
-  'judge03':  'pnb@123',
-  'pnbuser':  'pnb@123',
-  'chanukya': 'pnb@123',
-  'anil':     'pnb@123',
-  'ankush':   'pnb@123',
-  'santosh':  'pnb@123',
-  'mentor':   'pnb@123'
-};
+// â”€â”€ Supabase client (anon key â€” safe for browser) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const SUPABASE_URL      = 'https://uiulgfwvswdoguzksaya.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_JLWSVfvZSh3pn2GlkwZBdg_Fkq9SXVd';
+let sbClient = null;
+if (window.supabase) {
+  sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} else {
+  console.error('[QSCS] Supabase CDN failed to load!');
+}
 
-const USER_DISPLAY = {
-  'judge01':  'Judge 01',  'judge02': 'Judge 02', 'judge03': 'Judge 03',
-  'pnbuser':  'PNB User',  'chanukya':'Chanukya',
-  'anil':     'Anil',      'ankush':  'Ankush',
-  'santosh':  'Santosh',   'mentor':  'Mentor'
-};
+// Active session â€” updated on login / session restore
+let _session = null;
 
-const SESSION_KEY = 'qscs_session_v1';
+/** Return the JWT access token for API Authorization headers. */
+function getJWT() {
+  return _session?.access_token ?? null;
+}
 
-/* ── helpers ── */
+/** Build Authorization headers; falls back to Content-Type only if unauthenticated. */
+function authHeaders() {
+  const token = getJWT();
+  return token
+    ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+    : { 'Content-Type': 'application/json' };
+}
+
+/* â”€â”€ DOM helper â”€â”€ */
 function $id(id) { return document.getElementById(id); }
 
+// â”€â”€ Error display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function loginSetError(msg) {
   var el = $id('loginErrorMsg');
   var tx = $id('loginErrorText');
@@ -1623,9 +2182,10 @@ function loginSetError(msg) {
     if (el) el.style.display = 'none';
     if (u)  u.classList.remove('error');
     if (p)  p.classList.remove('error');
-  }, 4000);
+  }, 5000);
 }
 
+// â”€â”€ Card shake animation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function loginShakeCard() {
   var card = document.querySelector('.login-card');
   if (!card) return;
@@ -1633,115 +2193,165 @@ function loginShakeCard() {
   card.style.transition = 'transform 0.07s ease';
   var steps = [-8, 8, -5, 5, -2, 0];
   var i = 0;
-  var step = function() {
+  (function step() {
     if (i < steps.length) {
-      card.style.transform = 'translateX(' + steps[i] + 'px)';
-      i++;
+      card.style.transform = 'translateX(' + steps[i++] + 'px)';
       setTimeout(step, 70);
     } else {
       card.style.transition = orig;
     }
-  };
-  step();
+  })();
 }
 
-function enterApp(username) {
+// â”€â”€ Show the main app after authentication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function enterApp(user) {
   var screen = $id('login-screen');
   if (!screen) return;
+
   var nameEl = $id('headerUserName');
-  if (nameEl) nameEl.textContent = '\uD83D\uDC64 ' + (USER_DISPLAY[username] || username);
+  if (nameEl) nameEl.textContent = '\uD83D\uDC64 ' + (user.email || 'User');
+
   screen.classList.add('fade-out');
   setTimeout(function() { screen.style.display = 'none'; }, 480);
+
+  // Log login event to backend with real JWT
   try {
     fetch(API_BASE_URL + '/api/audit-login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username, event: 'USER_LOGIN' })
+      headers: authHeaders(),
+      body: JSON.stringify({ event: 'USER_LOGIN' })
     }).catch(function(){});
   } catch(e) {}
-  console.info('[QSCS Auth] Logged in as: ' + username);
+
+  // Load all live dashboard data from Supabase
+  refreshDashboardData();
+  console.info('[QSCS Auth] Logged in as:', user.email);
 }
 
-function handleLoginClick() {
-  var uEl = $id('loginUsername');
-  var pEl = $id('loginPassword');
-  var btn = $id('loginBtn');
+// â”€â”€ Fetch scan history from Supabase (RLS-filtered by user) â”€â”€â”€
+async function fetchHistoryFromSupabase() {
+  try {
+    const { data, error } = await sbClient
+      .from('scan_results')
+      .select('id, domain, quantum_risk_score, risk_level, pqc_readiness_pct, created_at')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) throw error;
+    if (!data || data.length === 0) return;
+
+    AppState.scanHistory = data.map(row => ({
+      domain:    row.domain,
+      riskLevel: row.risk_level   || 'UNKNOWN',
+      riskScore: row.quantum_risk_score || 0,
+      readiness: row.pqc_readiness_pct  || 0,
+      timestamp: new Date(row.created_at),
+      id:        row.id,
+    }));
+
+    renderHistoryTable();
+    console.info('[QSCS Supabase] Loaded', data.length, 'scan records');
+  } catch (err) {
+    console.warn('[QSCS Supabase] Could not load history:', err.message);
+  }
+}
+
+function refreshDashboardData() {
+  if (typeof fetchHistoryFromSupabase === 'function') fetchHistoryFromSupabase();
+  if (typeof fetchAssetsFromSupabase === 'function') fetchAssetsFromSupabase();
+  if (typeof fetchNameservers === 'function') fetchNameservers();
+  if (typeof fetchAuditLogs === 'function') fetchAuditLogs();
+  if (typeof fetchDashboardStats === 'function') fetchDashboardStats();
+}
+
+// â”€â”€ Login click handler â€” Supabase Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+async function handleLoginClick() {
+  var uEl    = $id('loginUsername');
+  var pEl    = $id('loginPassword');
+  var btn    = $id('loginBtn');
   var btnTxt = $id('loginBtnContent');
 
-  var username = (uEl ? uEl.value.trim().toLowerCase() : '');
+  var email    = (uEl ? uEl.value.trim() : '');
   var password = (pEl ? pEl.value : '');
 
-  // clear errors
   var errEl = $id('loginErrorMsg');
   if (errEl) errEl.style.display = 'none';
   if (uEl) uEl.classList.remove('error');
   if (pEl) pEl.classList.remove('error');
 
-  if (!username) { loginSetError('Please enter your username'); if(uEl) uEl.focus(); return; }
-  if (!password) { loginSetError('Please enter your password'); if(pEl) pEl.focus(); return; }
+  if (!email)    { loginSetError('Please enter your email address'); if (uEl) uEl.focus(); return; }
+  if (!password) { loginSetError('Please enter your password');       if (pEl) pEl.focus(); return; }
 
-  // loading state
-  if (btn) btn.disabled = true;
+  if (btn)    btn.disabled = true;
   if (btnTxt) btnTxt.innerHTML = '<span class="login-btn-spinner"></span> Authenticating...';
 
-  setTimeout(function() {
-    var expected = AUTHORIZED_USERS[username];
-    if (expected && password === expected) {
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify({ username: username }));
-      enterApp(username);
+  try {
+    const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    _session = data.session;
+    enterApp(data.user);
+  } catch (err) {
+    if (btn)    btn.disabled = false;
+    if (btnTxt) btnTxt.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Sign In';
+    loginShakeCard();
+    const msg = err.message || '';
+    if (msg.includes('Invalid login')) {
+      loginSetError('Incorrect email or password \u2014 please try again');
+    } else if (msg.includes('Email not confirmed')) {
+      loginSetError('Please confirm your email address first');
     } else {
-      if (btn) btn.disabled = false;
-      if (btnTxt) btnTxt.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Sign In';
-      loginShakeCard();
-      if (!AUTHORIZED_USERS[username]) {
-        loginSetError('Username not found — access denied');
-      } else {
-        loginSetError('Incorrect password — please try again');
-      }
-      if (pEl) { pEl.value = ''; pEl.focus(); }
+      loginSetError(msg || 'Authentication failed \u2014 please try again');
     }
-  }, 800);
+    console.warn('[QSCS Auth] Login failed:', err.message);
+  }
 }
 
-function handleLogout() {
-  sessionStorage.removeItem(SESSION_KEY);
+// â”€â”€ Logout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+async function handleLogout() {
+  await sbClient.auth.signOut();
+  _session = null;
+
   var screen = $id('login-screen');
   if (screen) {
     screen.style.display = 'flex';
     screen.style.opacity = '1';
     screen.classList.remove('fade-out');
   }
-  var u = $id('loginUsername');
-  var p = $id('loginPassword');
-  if (u) u.value = '';
-  if (p) p.value = '';
-  var nameEl = $id('headerUserName');
-  if (nameEl) nameEl.textContent = '';
+  if ($id('loginUsername')) $id('loginUsername').value = '';
+  if ($id('loginPassword')) $id('loginPassword').value = '';
+  if ($id('headerUserName')) $id('headerUserName').textContent = '';
+
+  AppState.scanHistory = [];
+  renderHistoryTable();
   console.info('[QSCS Auth] Logged out');
 }
 
-function initLoginSystem() {
-  // Check existing session
-  try {
-    var sess = sessionStorage.getItem(SESSION_KEY);
-    if (sess) {
-      var data = JSON.parse(sess);
-      if (data.username && AUTHORIZED_USERS[data.username]) {
-        enterApp(data.username);
-        return;
+// â”€â”€ Init login system â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+async function initLoginSystem() {
+
+  // 1. Patch handleScan: inject JWT into backend fetch calls
+  const _origHandleScan = window.handleScan || handleScan;
+  window.handleScan = async function() {
+    const _origFetch = window.fetch;
+    window.fetch = function(url, opts) {
+      opts = opts || {};
+      if (typeof url === "string" && url.includes(API_BASE_URL)) {
+        opts.headers = Object.assign({}, opts.headers || {}, authHeaders());
       }
+      return _origFetch.call(this, url, opts);
+    };
+    try {
+      await _origHandleScan();
+    } finally {
+      window.fetch = _origFetch;
+      setTimeout(refreshDashboardData, 1500);
     }
-  } catch(e) {}
+  };
 
-  // Wire up login button
+  // 2. Wire up login button SYNCHRONOUSLY first
   var loginBtn = $id('loginBtn');
-  if (loginBtn) {
-    loginBtn.onclick = handleLoginClick;
-  } else {
-    console.error('[QSCS Auth] loginBtn not found!');
-  }
+  if (loginBtn) loginBtn.onclick = handleLoginClick;
 
-  // Enter key support
   ['loginUsername', 'loginPassword'].forEach(function(id) {
     var el = $id(id);
     if (el) el.addEventListener('keydown', function(e) {
@@ -1749,7 +2359,6 @@ function initLoginSystem() {
     });
   });
 
-  // Password visibility toggle
   var toggle = $id('loginPwdToggle');
   var pwdInput = $id('loginPassword');
   var eyeOpen = $id('eyeOpen');
@@ -1758,24 +2367,44 @@ function initLoginSystem() {
     toggle.onclick = function() {
       var show = pwdInput.type === 'password';
       pwdInput.type = show ? 'text' : 'password';
-      if (eyeOpen)   eyeOpen.style.display   = show ? 'none'  : 'block';
+      if (eyeOpen) eyeOpen.style.display = show ? 'none' : 'block';
       if (eyeClosed) eyeClosed.style.display = show ? 'block' : 'none';
       pwdInput.focus();
     };
   }
 
-  // Logout button
   var logoutBtn = $id('logoutBtn');
   if (logoutBtn) logoutBtn.onclick = handleLogout;
 
-  // Focus username
+  var label = document.querySelector('label[for="loginUsername"]');
+  if (label) label.textContent = 'Email';
+  var uInput = $id('loginUsername');
+  if (uInput) {
+    uInput.type = 'email';
+    uInput.placeholder = 'Enter your email address';
+    uInput.autocomplete = 'email';
+  }
+
   setTimeout(function() {
     var u = $id('loginUsername');
-    if (u) u.focus();
-  }, 300);
+    if (u && !_session) u.focus();
+  }, 200);
 
-  console.info('[QSCS Auth] Login system ready');
+  if (!sbClient) return;
+
+  try {
+    const { data: { session } } = await sbClient.auth.getSession();
+    if (session) {
+      _session = session;
+      enterApp(session.user);
+    }
+  } catch(e) {}
+
+  sbClient.auth.onAuthStateChange(function(_event, newSession) {
+    _session = newSession;
+  });
 }
 
 // Run after DOM fully loaded
 window.addEventListener('load', initLoginSystem);
+

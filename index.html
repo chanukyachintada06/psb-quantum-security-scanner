@@ -6,11 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quantum-Proof Systems Scanner | PNB CypherRed261</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2L28 8V16C28 23 22 28.5 16 30C10 28.5 4 23 4 16V8Z' fill='%23C41230'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23F5A623'/%3E%3C/svg%3E"/>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="frontend/styles.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link
     href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&family=Roboto+Slab:wght@700;800&display=swap"
     rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://d3js.org/d3.v7.min.js"></script>
 </head>
@@ -54,7 +55,7 @@
 
           <!-- Username -->
           <div class="login-field">
-            <label class="login-label" for="loginUsername">Username</label>
+            <label class="login-label" for="loginUsername">Email / Username</label>
             <div class="login-input-wrap">
               <span class="login-input-icon">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -268,10 +269,14 @@
 
     <!-- HOME SEC -->
     <section id="section-home" class="spa-section">
-      <div class="page-header">
+      <div class="dashboard-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
         <h2 class="page-title">Home</h2>
-        <p class="page-subtitle">Real-time overview of PNB's quantum cryptographic posture across all public-facing assets.</p>
+        <div class="last-updated-pill" style="font-size: 0.75rem; color: var(--pnb-text-dim); background: var(--pnb-surface-2); padding: 4px 12px; border-radius: 20px; border: 1px solid var(--pnb-border);">
+          <span class="status-dot" style="width: 8px; height: 8px; display: inline-block; background: var(--pnb-success); border-radius: 50%; margin-right: 6px;"></span>
+          Last updated: <span id="lastUpdatedTime">--:--:--</span>
+        </div>
       </div>
+      <p class="page-subtitle" style="margin-top: -16px; margin-bottom: 24px;">Real-time overview of PNB's quantum cryptographic posture across all public-facing assets.</p>
 
       <!-- ROW 1: Stat Cards -->
       <div class="stat-grid">
@@ -282,7 +287,7 @@
           </svg>
           <div class="stat-content">
             <span class="stat-label">Total Assets</span>
-            <span class="stat-value">128</span>
+            <span class="stat-value" id="stat-total-assets">0</span>
           </div>
         </div>
         <div class="stat-card">
@@ -293,8 +298,8 @@
             <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
           </svg>
           <div class="stat-content">
-            <span class="stat-label">Public Web Apps</span>
-            <span class="stat-value">42</span>
+            <span class="stat-label">Web Apps</span>
+            <span class="stat-value" id="stat-web-apps">0</span>
           </div>
         </div>
         <div class="stat-card">
@@ -305,33 +310,7 @@
           </svg>
           <div class="stat-content">
             <span class="stat-label">APIs</span>
-            <span class="stat-value">26</span>
-          </div>
-        </div>
-        <div class="stat-card">
-          <svg class="stat-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-            <line x1="6" y1="6" x2="6.01" y2="6"></line>
-            <line x1="6" y1="18" x2="6.01" y2="18"></line>
-          </svg>
-          <div class="stat-content">
-            <span class="stat-label">Servers</span>
-            <span class="stat-value">37</span>
-          </div>
-        </div>
-        <div class="stat-card stat-warning">
-          <svg class="stat-icon stat-warning-icon" width="24" height="24" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-            <line x1="16" y1="2" x2="16" y2="6"></line>
-            <line x1="8" y1="2" x2="8" y2="6"></line>
-            <line x1="3" y1="10" x2="21" y2="10"></line>
-          </svg>
-          <div class="stat-content">
-            <span class="stat-label">Expiring Certificates</span>
-            <span class="stat-value stat-warning-value">9</span>
+            <span class="stat-value" id="stat-apis">0</span>
           </div>
         </div>
         <div class="stat-card stat-danger">
@@ -343,7 +322,29 @@
           </svg>
           <div class="stat-content">
             <span class="stat-label">High Risk Assets</span>
-            <span class="stat-value stat-danger-value">14</span>
+            <span class="stat-value stat-danger-value" id="stat-high-risk">0</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <svg class="stat-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+          </svg>
+          <div class="stat-content">
+            <span class="stat-label">IPv4 Assets</span>
+            <span class="stat-value" id="stat-ipv4">0</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <svg class="stat-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+          </svg>
+          <div class="stat-content">
+            <span class="stat-label">IPv6 Assets</span>
+            <span class="stat-value" id="stat-ipv6">0</span>
           </div>
         </div>
       </div>
@@ -368,7 +369,10 @@
           </div>
         </div>
         <div class="chart-card chart-cert">
-          <h3 class="chart-title">Certificate Expiry Timeline</h3>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 class="chart-title" style="margin: 0;">Certificate Expiry Timeline</h3>
+            <span style="font-size: 0.65rem; background: rgba(59, 130, 246, 0.1); color: #3b82f6; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.2);">Sample Data (Demo Mode)</span>
+          </div>
           <ul class="cert-timeline">
             <li>
               <span class="cert-indicator bg-danger"></span>
@@ -469,76 +473,20 @@
               <tr>
                 <th>Asset Name</th>
                 <th>URL</th>
-                <th>IPV4 Address</th>
-                <th>IPV6 Address</th>
                 <th>Type</th>
                 <th>Owner</th>
                 <th>Risk</th>
                 <th>Cert Status</th>
-                <th>Key Length</th>
-                <th>Last Scan</th>
+                <th>Created On & By</th>
+                <th>Last Scanned & By</th>
+                <th style="width: 80px; text-align: center">Actions</th>
               </tr>
             </thead>
             <tbody id="homeAssetTableBody">
               <tr>
-                <td class="td-strong">portal.company.com</td>
-                <td><a href="#" class="td-link">https://portal.company.com</a></td>
-                <td class="mono">34.12.11.45</td>
-                <td class="mono">2001:0db8:85a3::7334</td>
-                <td>Web App</td>
-                <td>IT</td>
-                <td><span class="td-risk-pill HIGH">HIGH</span></td>
-                <td><span class="td-status-text color-success">Valid</span></td>
-                <td class="mono">2048-bit</td>
-                <td class="td-dim">2 hrs ago</td>
-              </tr>
-              <tr>
-                <td class="td-strong">api.company.com</td>
-                <td><a href="#" class="td-link">https://api.company.com</a></td>
-                <td class="mono">34.12.11.90</td>
-                <td class="mono">2001:0db8:85a3::1111</td>
-                <td>API</td>
-                <td>DevOps</td>
-                <td><span class="td-risk-pill MEDIUM">MEDIUM</span></td>
-                <td><span class="td-status-text color-warning">Expiring</span></td>
-                <td class="mono">4096-bit</td>
-                <td class="td-dim">5 hrs ago</td>
-              </tr>
-              <tr>
-                <td class="td-strong">vpn.company.com</td>
-                <td><a href="#" class="td-link">https://vpn.company.com</a></td>
-                <td class="mono">34.55.90.21</td>
-                <td class="mono">2001:0db8:85a3::abcd</td>
-                <td>Gateway</td>
-                <td>Infra</td>
-                <td><span class="td-risk-pill CRITICAL">CRITICAL</span></td>
-                <td><span class="td-status-text color-danger">Expired</span></td>
-                <td class="mono color-danger">1024-bit</td>
-                <td class="td-dim">1 hr ago</td>
-              </tr>
-              <tr>
-                <td class="td-strong">mail.company.com</td>
-                <td><a href="#" class="td-link">https://mail.company.com</a></td>
-                <td class="mono">35.11.44.10</td>
-                <td class="mono">2001:0db8:85a3::ff21</td>
-                <td>Server</td>
-                <td>IT</td>
-                <td><span class="td-risk-pill LOW">LOW</span></td>
-                <td><span class="td-status-text color-success">Valid</span></td>
-                <td class="mono">3072-bit</td>
-                <td class="td-dim">1 day ago</td>
-              </tr>
-              <tr>
-                <td class="td-strong">app.company.com</td>
-                <td><a href="#" class="td-link">https://app.company.com</a></td>
-                <td class="mono">34.77.21.12</td>
-                <td class="mono">2001:0db8:85a3::344</td>
-                <td>Web App</td>
-                <td>IT</td>
-                <td><span class="td-risk-pill MEDIUM">MEDIUM</span></td>
-                <td><span class="td-status-text color-success">Valid</span></td>
-                <td class="mono">2048-bit</td>
-                <td class="td-dim">5 days ago</td>
+                <td colspan="8" style="text-align:center; padding: 40px; color: var(--pnb-text-muted);">
+                  Loading assets from inventory...
+                </td>
               </tr>
             </tbody>
           </table>
@@ -567,41 +515,11 @@
                   <th>TTL</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody id="nameserverTableBody">
                 <tr>
-                  <td class="td-strong">ns1.company.com</td>
-                  <td>NS</td>
-                  <td class="mono">192.0.2.10</td>
-                  <td class="mono">2001:0db8:10</td>
-                  <td class="mono">3600</td>
-                </tr>
-                <tr>
-                  <td class="td-strong">ns2.company.com</td>
-                  <td>NS</td>
-                  <td class="mono">192.0.2.11</td>
-                  <td class="mono">2001:0db6:11</td>
-                  <td class="mono">3600</td>
-                </tr>
-                <tr>
-                  <td class="td-strong">ns3.company.com</td>
-                  <td>NS</td>
-                  <td class="mono">192.0.2.12</td>
-                  <td class="mono">2001:0db6:12</td>
-                  <td class="mono">3600</td>
-                </tr>
-                <tr>
-                  <td class="td-strong">www.company.com</td>
-                  <td>A</td>
-                  <td class="mono">34.12.11.45</td>
-                  <td class="mono">2001:0db8::0579</td>
-                  <td class="mono">300</td>
-                </tr>
-                <tr>
-                  <td class="td-strong">mail.company.com</td>
-                  <td>MX</td>
-                  <td class="mono">35.11.44.10</td>
-                  <td class="mono">2001:0db8::2a0</td>
-                  <td class="mono">300</td>
+                  <td colspan="5" style="text-align:center; padding: 20px; color: var(--pnb-text-muted);">
+                    Waiting for domain resolution...
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -670,20 +588,8 @@
       <div class="activity-bar">
         <h4 class="activity-title">Recent Activity</h4>
         <div class="activity-feed" id="homeActivityFeed">
-          <div class="activity-item">
-            <span class="activity-icon">❌</span>
-            <span class="activity-text">Fail scan completed: 125 assets</span>
-            <span class="activity-time td-dim">10 min ago</span>
-          </div>
-          <div class="activity-item">
-            <span class="activity-icon">⚠️</span>
-            <span class="activity-text">Weak cipher detected: vpn.company.com</span>
-            <span class="activity-time td-dim">1 hr ago</span>
-          </div>
-          <div class="activity-item">
-            <span class="activity-icon">✅</span>
-            <span class="activity-text">Certificate expiring soon: api.company.com</span>
-            <span class="activity-time td-dim">3 hrs ago</span>
+          <div class="activity-item" style="justify-content: center; opacity: 0.6; padding: 10px;">
+            Loading recent activity...
           </div>
         </div>
       </div>
@@ -736,197 +642,111 @@
         <h2 class="page-title">Asset Inventory</h2>
         <p class="page-subtitle">Scan and assess TLS cryptographic configuration of public-facing endpoints for PQC readiness.</p>
       </div>
-      <div class="asset-grid-layout">
-        <div class="main-grid">
-          <!-- LEFT COLUMN -->
-          <div class="col-left">
-            <section class="card scan-card" aria-labelledby="scanTitle">
-              <div class="card-header">
-                <h2 class="card-title" id="scanTitle">
-                  <span class="card-title-icon" aria-hidden="true">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.4" />
-                      <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                    </svg>
-                  </span>
-                  Initiate Scan
-                </h2>
-              </div>
-              <div class="card-body">
-                <div class="input-group">
-                  <label class="input-label" for="domainInput">Target Domain / IP Address</label>
-                  <div class="input-wrapper">
-                    <span class="input-icon" aria-hidden="true">
-                      <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-                        <circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.3" />
-                        <path d="M8 2.5C8 2.5 6 5 6 8s2 5.5 2 5.5M8 2.5C8 2.5 10 5 10 8s-2 5.5-2 5.5M2.5 8h11"
-                          stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
-                      </svg>
-                    </span>
-                    <input type="text" id="domainInput" class="domain-input"
-                      placeholder="e.g. example.com or 192.168.1.1" autocomplete="off" spellcheck="false" />
-                  </div>
-                  <p class="validation-msg" id="validationMsg" role="alert" aria-live="polite"></p>
-                </div>
-                <button class="scan-btn" id="scanBtn" type="button">
-                  <span class="scan-btn-spinner" id="scanBtnSpinner" aria-hidden="true" hidden></span>
-                  <span class="scan-btn-text" id="scanBtnText">Scan Now</span>
-                  <svg class="scan-btn-arrow" id="scanBtnIcon" width="16" height="16" viewBox="0 0 16 16" fill="none"
-                    aria-hidden="true">
-                    <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
-                      stroke-linejoin="round" />
-                  </svg>
-                </button>
-              </div>
-            </section>
-
-            <section class="card risk-card" id="riskCard" aria-labelledby="riskTitle">
-              <div class="card-header">
-                <h2 class="card-title" id="riskTitle">
-                  <span class="card-title-icon" aria-hidden="true">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <path d="M8 1.5l1.6 4.9H15l-4.1 3 1.5 4.8L8 11.3l-4.4 2.9 1.5-4.8L1 6.4h5.4L8 1.5z"
-                        stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
-                    </svg>
-                  </span>
-                  Risk Summary
-                </h2>
-                <span class="risk-badge" id="riskBadge" data-level="">—</span>
-              </div>
-              <div class="card-body">
-                <div class="empty-state" id="riskEmptyState">
-                  <div class="empty-icon" aria-hidden="true">
-                    <svg width="42" height="42" viewBox="0 0 42 42" fill="none">
-                      <circle cx="21" cy="21" r="18" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 3" />
-                      <path d="M21 13v9M21 28v1" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                    </svg>
-                  </div>
-                  <p class="empty-title">No Scan Data</p>
-                  <p class="empty-desc">Enter a domain or IP and initiate a scan to view risk assessment.</p>
-                </div>
-                <div class="risk-content" id="riskContent" hidden>
-                  <div class="risk-metrics">
-                    <div class="metric-block">
-                      <span class="metric-label">Risk Score</span>
-                      <div class="metric-value-row">
-                        <span class="metric-value" id="riskScore">—</span>
-                        <span class="metric-suffix">/100</span>
-                      </div>
-                    </div>
-                    <div class="metric-divider" aria-hidden="true"></div>
-                    <div class="metric-block">
-                      <span class="metric-label">PQC Readiness</span>
-                      <div class="metric-value-row">
-                        <span class="metric-value" id="readinessPct">—</span>
-                        <span class="metric-suffix">%</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="progress-section">
-                    <div class="progress-header">
-                      <span class="progress-label-text">Quantum Readiness</span>
-                      <span class="progress-label-pct" id="progressLabel">0%</span>
-                    </div>
-                    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
-                      id="progressBar" aria-valuenow="0">
-                      <div class="progress-fill" id="progressFill"></div>
-                    </div>
-                    <div class="progress-endpoints">
-                      <span>Not Ready</span>
-                      <span>Quantum-Safe</span>
-                    </div>
-                  </div>
-                  <div class="risk-target-row">
-                    <span class="risk-target-label">Target</span>
-                    <span class="risk-target-value mono" id="riskTarget">—</span>
-                  </div>
-                </div>
-              </div>
-            </section>
-          </div>
-
-          <!-- RIGHT COLUMN -->
-          <div class="col-right">
-            <div class="error-banner" id="errorBanner" role="alert" aria-live="assertive" hidden>
-              <div class="error-banner-inner">
-                <svg class="error-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-                  <circle cx="9" cy="9" r="7.5" stroke="currentColor" stroke-width="1.4" />
-                  <path d="M9 5.5v4M9 12v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+      <div class="asset-grid-layout" style="display: flex; flex-direction: column; gap: 24px;">
+        <!-- SCAN INITIATOR -->
+        <section class="card scan-card" aria-labelledby="scanTitle">
+          <div class="card-header">
+            <h2 class="card-title" id="scanTitle">
+              <span class="card-title-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.4" />
+                  <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
                 </svg>
+              </span>
+              Initiate Scanner
+            </h2>
+          </div>
+          <div class="card-body">
+            <div class="input-group">
+              <label class="input-label" for="domainInput">Target Domain / IP Address</label>
+              <div class="input-wrapper">
+                <span class="input-icon" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                    <circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.3" />
+                    <path d="M8 2.5C8 2.5 6 5 6 8s2 5.5 2 5.5M8 2.5C8 2.5 10 5 10 8s-2 5.5-2 5.5M2.5 8h11"
+                      stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                  </svg>
+                </span>
+                <input type="text" id="domainInput" class="domain-input"
+                  placeholder="e.g. example.com or 192.168.1.1" autocomplete="off" spellcheck="false" />
+              </div>
+              <p class="validation-msg" id="validationMsg" role="alert" aria-live="polite"></p>
+            </div>
+            <button class="scan-btn" id="scanBtn" type="button">
+              <span class="scan-btn-spinner" id="scanBtnSpinner" aria-hidden="true" hidden></span>
+              <span class="scan-btn-text" id="scanBtnText">Scan Now</span>
+              <svg class="scan-btn-arrow" id="scanBtnIcon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+            <div class="error-banner" id="errorBanner" role="alert" aria-live="assertive" hidden style="margin-top:16px;">
+              <div class="error-banner-inner">
                 <span class="error-msg" id="errorMsg">An error occurred.</span>
               </div>
               <button class="error-close" id="errorClose" aria-label="Dismiss error">✕</button>
             </div>
-
-            <section class="card tls-card" id="tlsCard" aria-labelledby="tlsTitle">
-              <div class="card-header">
-                <h2 class="card-title" id="tlsTitle">
-                  <span class="card-title-icon" aria-hidden="true">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <rect x="2.5" y="7.5" width="11" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3" />
-                      <path d="M5 7.5V5a3 3 0 016 0v2.5" stroke="currentColor" stroke-width="1.3"
-                        stroke-linecap="round" />
-                      <circle cx="8" cy="11" r="1" fill="currentColor" />
-                    </svg>
-                  </span>
-                  TLS Certificate Details
-                </h2>
-                <span class="tls-live-badge" id="tlsLiveBadge" hidden>LIVE</span>
-              </div>
-              <div class="card-body">
-                <div class="tls-empty" id="tlsEmptyState">
-                  <p class="empty-desc center">Run a scan to inspect TLS configuration details.</p>
-                </div>
-                <div class="tls-grid" id="tlsGrid" hidden>
-                  <div class="tls-field">
-                    <span class="tls-field-label">TLS Version</span>
-                    <span class="tls-field-value mono" id="tlsVersion">—</span>
-                  </div>
-                  <div class="tls-field">
-                    <span class="tls-field-label">Cipher Suite</span>
-                    <span class="tls-field-value mono" id="tlsCipher">—</span>
-                  </div>
-                  <div class="tls-field">
-                    <span class="tls-field-label">Key Exchange</span>
-                    <span class="tls-field-value mono" id="tlsKeyExchange">—</span>
-                  </div>
-                  <div class="tls-field">
-                    <span class="tls-field-label">Public Key Type</span>
-                    <span class="tls-field-value mono" id="tlsKeyType">—</span>
-                  </div>
-                  <div class="tls-field">
-                    <span class="tls-field-label">Key Size</span>
-                    <span class="tls-field-value mono" id="tlsKeySize">—</span>
-                  </div>
-                  <div class="tls-field">
-                    <span class="tls-field-label">Signature Hash</span>
-                    <span class="tls-field-value mono" id="tlsSigHash">—</span>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section class="card rec-card" id="recCard" aria-labelledby="recTitle">
-              <div class="card-header">
-                <h2 class="card-title" id="recTitle">
-                  <span class="card-title-icon" aria-hidden="true">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <path d="M3 4h10M3 8h7M3 12h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                    </svg>
-                  </span>
-                  Migration Recommendations
-                </h2>
-                <span class="rec-count" id="recCount" hidden></span>
-              </div>
-              <div class="card-body">
-                <div class="rec-empty" id="recEmptyState">
-                  <p class="empty-desc center">Recommendations will appear after a completed scan.</p>
-                </div>
-                <ul class="rec-list" id="recList" hidden aria-label="Migration recommendations"></ul>
-              </div>
-            </section>
           </div>
+        </section>
+
+        <!-- ENGINE RESULTS UI (Hidden until scan finishes) -->
+        <div id="engineResultsContainer" style="display:none; flex-direction:column; gap:24px;">
+          
+          <!-- HNDL Risk Badge -->
+          <div class="hndl-badge-container" id="engineHndlBadge" style="display:none;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="margin-right:8px; color:var(--pnb-red);">
+              <path d="M12 9v2m0 4h.01M22.201 19L13.882 3.633C13.25 2.457 10.75 2.457 10.118 3.633L1.799 19C1.144 20.219 2.124 22 3.681 22h16.638c1.557 0 2.537-1.781 1.882-3z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="hndl-badge-text">⚠️ Harvest Now, Decrypt Later Risk Detected</span>
+          </div>
+
+          <!-- Top Summary -->
+          <div class="engine-summary-card" id="engineSummaryCard">
+            <h3 style="font-size:1.1rem; color:var(--pnb-text); margin:0;">
+              Domain: <span id="engineDomainName" class="mono"></span>
+              <div style="font-size:0.75rem; color:var(--pnb-text-muted); font-weight:normal; margin-top:4px;" id="engineTopRiskNode"></div>
+            </h3>
+            <div class="engine-summary-stats">
+              <div class="engine-summary-stat">
+                <span class="engine-stat-label">PQC Score</span>
+                <span class="engine-stat-val" id="enginePqcScore">0</span>
+              </div>
+              <div class="engine-summary-stat">
+                <span class="engine-stat-label">Agility Score</span>
+                <span class="engine-stat-val" id="engineAgilityScore">0</span>
+              </div>
+              <div class="engine-summary-stat">
+                <span class="engine-stat-label">Overall Risk</span>
+                <span class="engine-stat-val" id="engineRiskLevel" style="font-family:var(--font-sans);">HIGH</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- IP Nodes Table -->
+          <div class="node-table-wrapper">
+             <table class="node-table">
+                  <thead>
+                    <tr>
+                      <th>Node IP</th>
+                      <th>TLS Version</th>
+                      <th>Key Type</th>
+                      <th>Risk Level</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="engineNodeTableBody">
+                    <!-- Populated by script.js -->
+                  </tbody>
+             </table>
+          </div>
+
+          <!-- Findings Grid -->
+          <h3 style="font-size:1.1rem; color:var(--pnb-text); margin-bottom:-8px;">Security Findings & Recommendations</h3>
+          <div class="findings-grid" id="engineFindingsGrid">
+             <!-- Populated by script.js -->
+          </div>
+          
         </div>
+      </div>
 
         <section class="card history-card" aria-labelledby="historyTitle">
           <div class="card-header">
@@ -2122,7 +1942,7 @@
 
   </main>
 
-  <script src="script.js"></script>
+  <script src="frontend/script.js?v=2.0.1"></script>
 </body>
 
 </html>

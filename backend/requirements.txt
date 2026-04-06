@@ -5,4 +5,6 @@ cryptography
 pydantic
 python-dotenv
 httpx
-mysql-connector-python
+supabase
+PyJWT
+dnspython

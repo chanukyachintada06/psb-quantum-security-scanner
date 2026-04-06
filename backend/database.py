@@ -2,398 +2,387 @@
 Database Layer — Quantum-Proof Systems Scanner
 Team CypherRed261 — PSB Hackathon 2026
 
-Handles all MySQL operations:
-  - scan_results      : Every TLS scan stored permanently
-  - cbom_records      : Cryptographic Bill of Materials (CERT-IN Annexure-A)
-  - audit_logs        : System event tracking (SRS Section 5.4)
-  - classification_labels : PQC labels issued to assets (FR-17, FR-18)
+Supabase (PostgreSQL) backend.
+Uses service_role key — NEVER expose this key to the frontend.
 """
 
-import mysql.connector
-from mysql.connector import Error
-from datetime import datetime, date, timedelta
 import os
+from supabase import create_client, Client
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── DB CONFIG ──────────────────────────────────────────────────
-DB_CONFIG = {
-    'host':     os.getenv('DB_HOST', 'localhost'),
-    'port':     int(os.getenv('DB_PORT', 3306)),
-    'database': os.getenv('DB_NAME', 'quantum_scanner_db'),
-    'user':     os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', 'root123'),
-    'autocommit': True
-}
+# ── SUPABASE CLIENT (service_role — bypasses RLS) ─────────────
+SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
+# System fallback user_id for demo / unauthenticated scans
+SYSTEM_USER_ID: str = os.getenv("SYSTEM_USER_ID", "00000000-0000-0000-0000-000000000000")
+
+_supabase: Client | None = None
 
 
-def get_connection():
-    """Create and return a MySQL connection."""
-    return mysql.connector.connect(**DB_CONFIG)
+def get_client() -> Client:
+    """Return (and lazily initialise) the Supabase service-role client."""
+    global _supabase
+    if _supabase is None:
+        if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+            raise RuntimeError(
+                "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env"
+            )
+        _supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    return _supabase
 
 
-# ── TABLE CREATION ─────────────────────────────────────────────
-def init_db():
-    """
-    Create all required tables if they don't exist.
-    Called once on application startup.
-    """
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    # Table 1 — scan_results
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS scan_results (
-            id                  INT AUTO_INCREMENT PRIMARY KEY,
-            domain              VARCHAR(253) NOT NULL,
-            scan_timestamp      DATETIME NOT NULL,
-            tls_version         VARCHAR(20),
-            cipher_suite        VARCHAR(150),
-            key_exchange        VARCHAR(80),
-            public_key_type     VARCHAR(30),
-            key_size            VARCHAR(40),
-            signature_hash      VARCHAR(80),
-            cert_subject        VARCHAR(255),
-            cert_issuer         VARCHAR(255),
-            cert_valid_from     DATE,
-            cert_valid_until    DATE,
-            days_remaining      INT,
-            is_expired          BOOLEAN DEFAULT FALSE,
-            is_expiring_soon    BOOLEAN DEFAULT FALSE,
-            risk_level          VARCHAR(10),
-            risk_score          INT,
-            pqc_readiness       INT,
-            quantum_vulnerable  BOOLEAN DEFAULT TRUE,
-            scan_duration_ms    INT,
-            created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX idx_domain (domain),
-            INDEX idx_risk_level (risk_level),
-            INDEX idx_created_at (created_at)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """)
-
-    # Table 2 — cbom_records
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cbom_records (
-            id                      INT AUTO_INCREMENT PRIMARY KEY,
-            scan_id                 INT NOT NULL,
-            asset                   VARCHAR(253) NOT NULL,
-            key_length              VARCHAR(30),
-            cipher_suite            VARCHAR(150),
-            tls_version             VARCHAR(20),
-            certificate_authority   VARCHAR(150),
-            quantum_safe            BOOLEAN DEFAULT FALSE,
-            created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (scan_id) REFERENCES scan_results(id) ON DELETE CASCADE,
-            INDEX idx_asset (asset),
-            INDEX idx_quantum_safe (quantum_safe)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """)
-
-    # Table 3 — audit_logs (SRS Section 5.4)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS audit_logs (
-            id          INT AUTO_INCREMENT PRIMARY KEY,
-            event_type  VARCHAR(50) NOT NULL,
-            domain      VARCHAR(253),
-            user_ip     VARCHAR(45),
-            description TEXT,
-            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX idx_event_type (event_type),
-            INDEX idx_created_at (created_at)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """)
-
-    # Table 4 — classification_labels (FR-17, FR-18)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS classification_labels (
-            id          INT AUTO_INCREMENT PRIMARY KEY,
-            scan_id     INT NOT NULL,
-            domain      VARCHAR(253) NOT NULL,
-            label       VARCHAR(30) NOT NULL,
-            issued_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-            valid_until DATE,
-            FOREIGN KEY (scan_id) REFERENCES scan_results(id) ON DELETE CASCADE,
-            INDEX idx_domain (domain),
-            INDEX idx_label (label)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    """)
-
-    cursor.close()
-    conn.close()
-    print("  ✅ Database tables initialized successfully.")
+# ── CONNECTION TEST ─────────────────────────────────────────────
+def test_connection() -> bool:
+    """Ping Supabase — returns True if reachable."""
+    try:
+        client = get_client()
+        client.table("scan_results").select("id").limit(1).execute()
+        return True
+    except Exception as e:
+        print(f"  ❌ Supabase connection failed: {e}")
+        return False
 
 
 # ── SAVE SCAN RESULT ───────────────────────────────────────────
-def save_scan_result(scan_data: dict) -> int:
+def save_scan_result(user_id: str, scan_data: dict, created_by: str = None) -> str | None:
     """
-    Save a complete scan result to the database.
-
-    Args:
-        scan_data: The full scan result dict returned by scanner.py
-
-    Returns:
-        The auto-generated scan ID (used to link CBOM and label records)
+    Insert a scan result into the normalized tables.
     """
-    conn = get_connection()
-    cursor = conn.cursor()
+    profile = scan_data.get("risk_profile", {})
+    
+    # 1. Insert Summary
+    summary_row = {
+        "user_id":              user_id,
+        "domain":               scan_data.get("domain"),
+        "scan_version":         scan_data.get("scan_version"),
+        "pqc_score":            profile.get("pqc_score"),
+        "crypto_mode":          profile.get("crypto_mode"),
+        "quantum_risk_horizon": profile.get("quantum_risk_horizon"),
+        "crypto_agility_score": profile.get("crypto_agility_score"),
+        "risk_level":           profile.get("risk_level", "HIGH"),
+        "hndl_risk":            profile.get("hndl_risk", False),
+        "confidence_score":     profile.get("confidence_score", 0),
+        "scan_duration_ms":     scan_data.get("scan_duration_ms", 0),
+    }
 
-    tls = scan_data.get('tls', {})
-    cert = scan_data.get('certificate', {})
-    pqc = scan_data.get('pqc', {})
-
-    # Parse dates safely
-    def parse_date(date_str):
-        if not date_str or date_str == 'Unknown':
-            return None
-        try:
-            return datetime.strptime(date_str, '%Y-%m-%d').date()
-        except Exception:
-            return None
-
-    # Parse scan_timestamp
     try:
-        ts = datetime.fromisoformat(
-            scan_data.get('scan_timestamp', '').replace('Z', '+00:00')
-        ).replace(tzinfo=None)
-    except Exception:
-        ts = datetime.now()
+        res = get_client().table("scan_results").insert(summary_row).execute()
+        if not res.data:
+            return None
+        scan_id = res.data[0]["id"]
+        
+        # 2. Insert Per-IP Details
+        details = scan_data.get("ip_details", [])
+        detail_rows = []
+        for d in details:
+             tls = d.get("tls") or {}
+             cert = d.get("certificate") or {}
+             detail_rows.append({
+                  "scan_id": scan_id,
+                  "ip_address": d.get("ip_address"),
+                  "tls_version": tls.get("version"),
+                  "cipher_suite": tls.get("cipher_suite"),
+                  "key_exchange": tls.get("key_exchange"),
+                  "key_type": tls.get("public_key_type"),
+                  "key_size": tls.get("key_size"),
+                  "certificate_chain_status": cert.get("chain_status", "VALID"),
+                  "is_successful": d.get("is_successful", True),
+                  "error_message": d.get("error_message")
+             })
+        if detail_rows:
+             get_client().table("scan_details").insert(detail_rows).execute()
+             
+        # 3. Insert Findings
+        findings = scan_data.get("findings", [])
+        finding_rows = []
+        for f in findings:
+             finding_rows.append({
+                 "scan_id": scan_id,
+                 "type": f.get("type"),
+                 "severity": f.get("severity"),
+                 "title": f.get("title"),
+                 "description": f.get("description")
+             })
+        if finding_rows:
+             get_client().table("scan_findings").insert(finding_rows).execute()
+             
+        # 4. Insert Metadata (Optional JSONB)
+        get_client().table("scan_metadata").insert({
+             "scan_id": scan_id,
+             "raw_dns_records": scan_data.get("metadata", {}).get("raw_dns_records", {})
+        }).execute()
+        
+        return scan_id
 
-    sql = """
-        INSERT INTO scan_results (
-            domain, scan_timestamp,
-            tls_version, cipher_suite, key_exchange,
-            public_key_type, key_size, signature_hash,
-            cert_subject, cert_issuer, cert_valid_from, cert_valid_until,
-            days_remaining, is_expired, is_expiring_soon,
-            risk_level, risk_score, pqc_readiness, quantum_vulnerable,
-            scan_duration_ms
-        ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s
-        )
-    """
-    values = (
-        scan_data.get('domain'),
-        ts,
-        tls.get('version'),
-        tls.get('cipher_suite'),
-        tls.get('key_exchange'),
-        tls.get('public_key_type'),
-        tls.get('key_size'),
-        tls.get('signature_hash'),
-        cert.get('subject'),
-        cert.get('issuer'),
-        parse_date(cert.get('valid_from')),
-        parse_date(cert.get('valid_until')),
-        cert.get('days_remaining', 0),
-        cert.get('is_expired', False),
-        cert.get('is_expiring_soon', False),
-        pqc.get('risk_level'),
-        pqc.get('risk_score', 0),
-        pqc.get('pqc_readiness', 0),
-        pqc.get('quantum_vulnerable', True),
-        scan_data.get('scan_duration_ms', 0)
-    )
-
-    cursor.execute(sql, values)
-    scan_id = cursor.lastrowid
-
-    cursor.close()
-    conn.close()
-    return scan_id
+    except Exception as e:
+        print(f"  ⚠️  save_scan_result error: {e}")
+    return None
 
 
 # ── SAVE CBOM RECORD ───────────────────────────────────────────
-def save_cbom_record(scan_id: int, cbom_data: dict):
-    """Save a CBOM entry linked to a scan result."""
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    sql = """
-        INSERT INTO cbom_records (
-            scan_id, asset, key_length, cipher_suite,
-            tls_version, certificate_authority, quantum_safe
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-    """
-    values = (
-        scan_id,
-        cbom_data.get('asset'),
-        cbom_data.get('key_length'),
-        cbom_data.get('cipher_suite'),
-        cbom_data.get('tls_version'),
-        cbom_data.get('certificate_authority'),
-        cbom_data.get('quantum_safe', False)
-    )
-
-    cursor.execute(sql, values)
-    cursor.close()
-    conn.close()
-
-
-# ── SAVE CLASSIFICATION LABEL ─────────────────────────────────
-def save_classification_label(scan_id: int, domain: str, risk_level: str):
-    """
-    Issue and save a PQC classification label (FR-17, FR-18).
-
-    Label mapping:
-      LOW risk     → 'PQC Ready'
-      MEDIUM risk  → 'Not Quantum Safe'
-      HIGH risk    → 'Not Quantum Safe'
-      CRITICAL     → 'Not Quantum Safe'
-    """
-    label_map = {
-        'LOW':      'PQC Ready',
-        'MEDIUM':   'Not Quantum Safe',
-        'HIGH':     'Not Quantum Safe',
-        'CRITICAL': 'Not Quantum Safe'
+def save_cbom_record(scan_id: str, cbom_data: dict) -> None:
+    """Insert a CBOM row linked to a scan."""
+    row = {
+        "scan_id":        scan_id,
+        "algorithm":      cbom_data.get("algorithm"),
+        "key_length":     cbom_data.get("key_length"),
+        "cipher_suite":   cbom_data.get("cipher_suite"),
+        "pqc_status":     cbom_data.get("pqc_status", "VULNERABLE"),
+        "recommendation": cbom_data.get("recommendation"),
+        "nist_standard":  cbom_data.get("nist_standard"),
     }
-    label = label_map.get(risk_level, 'Not Quantum Safe')
-    valid_until = (datetime.now() + timedelta(days=365)).date()
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    sql = """
-        INSERT INTO classification_labels (scan_id, domain, label, valid_until)
-        VALUES (%s, %s, %s, %s)
-    """
-    cursor.execute(sql, (scan_id, domain, label, valid_until))
-    cursor.close()
-    conn.close()
+    try:
+        get_client().table("cbom_records").insert(row).execute()
+    except Exception as e:
+        print(f"  ⚠️  save_cbom_record error: {e}")
 
 
 # ── SAVE AUDIT LOG ─────────────────────────────────────────────
-def save_audit_log(event_type: str, domain: str = None,
-                   user_ip: str = None, description: str = None):
-    """
-    Save an audit log entry (SRS Section 5.4).
-
-    Event types: SCAN_INITIATED, SCAN_COMPLETED, SCAN_FAILED,
-                 REPORT_GENERATED, LABEL_ISSUED
-    """
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    sql = """
-        INSERT INTO audit_logs (event_type, domain, user_ip, description)
-        VALUES (%s, %s, %s, %s)
-    """
-    cursor.execute(sql, (event_type, domain, user_ip, description))
-    cursor.close()
-    conn.close()
+def save_audit_log(
+    action: str,
+    user_id: str | None = None,
+    domain: str | None = None,
+    ip_address: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    """Insert an audit log entry."""
+    row = {
+        "user_id":    user_id,
+        "action":     action,
+        "domain":     domain,
+        "ip_address": ip_address,
+        "metadata":   metadata or {},
+    }
+    try:
+        get_client().table("audit_logs").insert(row).execute()
+    except Exception as e:
+        print(f"  ⚠️  save_audit_log error: {e}")
 
 
 # ── QUERY: RECENT SCANS ────────────────────────────────────────
-def get_recent_scans(limit: int = 20) -> list:
-    """Get the most recent scan results."""
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    cursor.execute("""
-        SELECT id, domain, scan_timestamp, tls_version,
-               risk_level, risk_score, pqc_readiness, scan_duration_ms
-        FROM scan_results
-        ORDER BY created_at DESC
-        LIMIT %s
-    """, (limit,))
-
-    results = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return results
+def get_recent_scans(user_id: str, limit: int = 20) -> list:
+    """Get the most recent scan results for a specific user."""
+    try:
+        res = (
+            get_client()
+            .table("scan_results")
+            .select("id, domain, scan_version, pqc_score, risk_level, crypto_mode, crypto_agility_score, scan_duration_ms, created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        print(f"  ⚠️  get_recent_scans error: {e}")
+        return []
 
 
 # ── QUERY: SCAN BY DOMAIN ──────────────────────────────────────
-def get_scans_by_domain(domain: str) -> list:
-    """Get all scans for a specific domain."""
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    cursor.execute("""
-        SELECT * FROM scan_results
-        WHERE domain = %s
-        ORDER BY created_at DESC
-    """, (domain,))
-
-    results = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return results
+def get_scans_by_domain(user_id: str, domain: str) -> list:
+    """Get all scans for a specific domain, filtered by user."""
+    try:
+        res = (
+            get_client()
+            .table("scan_results")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("domain", domain)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        print(f"  ⚠️  get_scans_by_domain error: {e}")
+        return []
 
 
 # ── QUERY: CBOM RECORDS ────────────────────────────────────────
-def get_cbom_records(limit: int = 50) -> list:
-    """Get recent CBOM records."""
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    cursor.execute("""
-        SELECT c.*, s.scan_timestamp, s.risk_level
-        FROM cbom_records c
-        JOIN scan_results s ON c.scan_id = s.id
-        ORDER BY c.created_at DESC
-        LIMIT %s
-    """, (limit,))
-
-    results = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return results
+def get_cbom_records(user_id: str, limit: int = 50) -> list:
+    """Get CBOM records for scans owned by this user (via JOIN)."""
+    try:
+        res = (
+            get_client()
+            .table("cbom_records")
+            .select("*, scan_results!inner(user_id, domain, risk_level, created_at)")
+            .eq("scan_results.user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        print(f"  ⚠️  get_cbom_records error: {e}")
+        return []
 
 
 # ── QUERY: AUDIT LOGS ──────────────────────────────────────────
-def get_audit_logs(limit: int = 50) -> list:
-    """Get recent audit log entries."""
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    cursor.execute("""
-        SELECT * FROM audit_logs
-        ORDER BY created_at DESC
-        LIMIT %s
-    """, (limit,))
-
-    results = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return results
+def get_audit_logs(user_id: str, limit: int = 50) -> list:
+    """Get audit log entries for this user."""
+    try:
+        res = (
+            get_client()
+            .table("audit_logs")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        print(f"  ⚠️  get_audit_logs error: {e}")
+        return []
 
 
 # ── QUERY: DASHBOARD STATS ─────────────────────────────────────
-def get_dashboard_stats() -> dict:
-    """Get aggregated stats for the dashboard."""
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    cursor.execute("""
-        SELECT
-            COUNT(*) as total_scans,
-            COUNT(DISTINCT domain) as unique_domains,
-            SUM(CASE WHEN risk_level = 'CRITICAL' THEN 1 ELSE 0 END) as critical_count,
-            SUM(CASE WHEN risk_level = 'HIGH' THEN 1 ELSE 0 END) as high_count,
-            SUM(CASE WHEN risk_level = 'MEDIUM' THEN 1 ELSE 0 END) as medium_count,
-            SUM(CASE WHEN risk_level = 'LOW' THEN 1 ELSE 0 END) as low_count,
-            AVG(pqc_readiness) as avg_pqc_readiness,
-            SUM(CASE WHEN quantum_vulnerable = TRUE THEN 1 ELSE 0 END) as vulnerable_count
-        FROM scan_results
-    """)
-
-    stats = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return stats or {}
-
-
-# ── TEST CONNECTION ────────────────────────────────────────────
-def test_connection() -> bool:
-    """Test if DB connection works. Returns True if successful."""
+def get_dashboard_stats(user_id: str) -> dict:
+    """Compute aggregated stats for the dashboard per user from the assets inventory."""
     try:
-        conn = get_connection()
-        conn.close()
+        # Get all assets for this user
+        res = (
+            get_client()
+            .table("assets")
+            .select("asset_type, risk_level, ipv4, ipv6, scan_count")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        rows = res.data or []
+        
+        # Initialize counters with all expected keys to ensure zero-data safety
+        stats = {
+            "total_assets": len(rows),
+            "high_risk_assets_count": 0,
+            "count_by_asset_type": {
+                "Web App": 0, "API": 0, "Server": 0, "Gateway": 0, "Load Balancer": 0, "Other": 0
+            },
+            "count_by_risk_level": {
+                "CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0
+            },
+            "ipv4_count": 0,
+            "ipv6_count": 0,
+            "total_scans": sum(r.get("scan_count") or 0 for r in rows)
+        }
+        
+        for r in rows:
+            # Asset Type grouping (case-insensitive keys for safety)
+            atype = r.get("asset_type", "Other")
+            if atype in stats["count_by_asset_type"]:
+                stats["count_by_asset_type"][atype] += 1
+            else:
+                stats["count_by_asset_type"]["Other"] += 1
+            
+            # Risk grouping
+            arisk = (r.get("risk_level") or "LOW").upper()
+            if arisk in stats["count_by_risk_level"]:
+                stats["count_by_risk_level"][arisk] += 1
+            
+            # High Risk Asset Definition: CRITICAL + HIGH
+            if arisk in ["CRITICAL", "HIGH"]:
+                stats["high_risk_assets_count"] += 1
+            
+            # IP versions
+            if r.get("ipv4"): stats["ipv4_count"] += 1
+            if r.get("ipv6"): stats["ipv6_count"] += 1
+            
+        return stats
+    except Exception as e:
+        print(f"  ⚠️  get_dashboard_stats error: {e}")
+        return {
+            "total_assets": 0,
+            "high_risk_assets_count": 0,
+            "count_by_asset_type": {"Web App": 0, "API": 0, "Server": 0, "Gateway": 0, "Load Balancer": 0, "Other": 0},
+            "count_by_risk_level": {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0},
+            "ipv4_count": 0,
+            "ipv6_count": 0,
+            "total_scans": 0
+        }
+
+
+# ── LEGACY SHIM (backward-compat with init_db calls in main.py) ─
+def init_db():
+    """No-op — Supabase schema is managed via SQL Editor, not code."""
+    print("  ℹ️  Supabase schema managed via SQL Editor (no init needed).")
+
+
+# ── ASSETS ─────────────────────────────────────────────────────
+def get_assets(user_id: str) -> list:
+    """Get the full asset inventory for a specific user."""
+    try:
+        res = (
+            get_client()
+            .table("assets")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        print(f"  ⚠️  get_assets error: {e}")
+        return []
+
+def add_asset(user_id: str, data: dict) -> dict | None:
+    """Add a new asset to the inventory."""
+    row = {
+        "user_id":          user_id,
+        "name":             data.get("name"),
+        "url":              data.get("url"),
+        "ipv4":             data.get("ipv4"),
+        "ipv6":             data.get("ipv6"),
+        "asset_type":       data.get("asset_type"),
+        "owner_department": data.get("owner_department"),
+        "created_by":       data.get("created_by"),
+        "risk_level":       data.get("risk_level", "LOW"),
+        "cert_status":      data.get("cert_status", "Valid"),
+    }
+    try:
+        res = get_client().table("assets").insert(row).execute()
+        return res.data[0] if res.data else None
+    except Exception as e:
+        print(f"  ⚠️  add_asset error: {e}")
+        return None
+
+def delete_asset(user_id: str, asset_id: str) -> bool:
+    """Delete an asset by ID."""
+    try:
+        get_client().table("assets").delete().eq("user_id", user_id).eq("id", asset_id).execute()
         return True
-    except Error as e:
-        print(f"  ❌ Database connection failed: {e}")
+    except Exception as e:
+        print(f"  ⚠️  delete_asset error: {e}")
         return False
+
+def update_asset(user_id: str, asset_id: str, data: dict) -> bool:
+    """Update an asset's information."""
+    row = {
+        "name":             data.get("name"),
+        "url":              data.get("url"),
+        "asset_type":       data.get("asset_type"),
+        "owner_department": data.get("owner_department"),
+        "updated_at":       "now()",
+        "updated_by":       data.get("updated_by"),
+    }
+    # Remove nulls to avoid overwriting fields we didn't send
+    row = {k: v for k, v in row.items() if v is not None}
+    
+    try:
+        get_client().table("assets").update(row).eq("user_id", user_id).eq("id", asset_id).execute()
+        return True
+    except Exception as e:
+        print(f"  ⚠️  update_asset error: {e}")
+        return False
+
+def get_nameservers(user_id: str, hostname: str = None) -> list:
+    """Get nameserver records for a user, optionally filtered by hostname."""
+    try:
+        query = get_client().table("nameserver_records").select("*").eq("user_id", user_id)
+        if hostname:
+            query = query.eq("hostname", hostname)
+        res = query.order("created_at", desc=True).execute()
+        return res.data or []
+    except Exception as e:
+        print(f"  ⚠️  get_nameservers error: {e}")
+        return []
