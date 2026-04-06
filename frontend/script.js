@@ -2141,7 +2141,7 @@ function initHomeFeatures() {
 
 // â”€â”€ Supabase client (anon key â€” safe for browser) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const SUPABASE_URL      = 'https://uiulgfwvswdoguzksaya.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_JLWSVfvZSh3pn2GlkwZBdg_Fkq9SXVd';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpdWxnZnd2c3dkb2d1emtzYXlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0Nzk1NjEsImV4cCI6MjA5MTA1NTU2MX0.PsyN6X0lbyP4q8Q6blaRM97B83idgItVQ5zxhEJ6yVA';
 let sbClient = null;
 if (window.supabase) {
   sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
