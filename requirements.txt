@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+sslyze
+cryptography
+pydantic
+python-dotenv
+httpx
+supabase
+PyJWT
+dnspython
