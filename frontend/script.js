@@ -18,7 +18,7 @@ let reportingInitialized = false;
 let sidebarCollapsed = false;
 let demoMode = false;
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'https://psb-hackathon2026.vercel.app/';
 
 /* ============================================================
    1. MOCK DATA ENGINE
