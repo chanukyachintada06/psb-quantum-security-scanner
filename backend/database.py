@@ -13,8 +13,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── SUPABASE CLIENT (service_role — bypasses RLS) ─────────────
-SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
-SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+# Try multiple naming conventions for maximum resilience on deployment
+SUPABASE_URL: str = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY", "")
 
 # System fallback user_id for demo / unauthenticated scans
 SYSTEM_USER_ID: str = os.getenv("SYSTEM_USER_ID", "00000000-0000-0000-0000-000000000000")
