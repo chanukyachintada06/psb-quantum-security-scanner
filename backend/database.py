@@ -4,9 +4,19 @@ Team CypherRed261 — PSB Hackathon 2026
 
 Supabase (PostgreSQL) backend.
 Uses service_role key — NEVER expose this key to the frontend.
+
+RBAC MODEL
+──────────
+  admin   → full read/write access across all users
+  jury    → full read access across all users (hackathon judges)
+  mentor  → full read access across all users
+  test    → full access (internal QA accounts)
+  auditor → read-only, scoped to own data (can be elevated later)
+  analyst → default; restricted to own data only
 """
 
 import os
+import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -19,6 +29,15 @@ SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.ge
 
 # System fallback user_id for demo / unauthenticated scans
 SYSTEM_USER_ID: str = os.getenv("SYSTEM_USER_ID", "00000000-0000-0000-0000-000000000000")
+
+# ── RBAC CONFIGURATION ─────────────────────────────────────────
+# Roles that bypass user_id filters and see ALL data in the system.
+# These are evaluated purely in backend logic (RLS is bypassed by service_role key).
+SUPERUSER_ROLES: set[str] = {"admin", "jury", "mentor", "test"}
+
+# Per-request in-memory role cache: { user_id → role_string }
+# Cleared on process restart — safe for stateless deployments.
+_role_cache: dict[str, str] = {}
 
 _supabase: Client | None = None
 
@@ -45,6 +64,75 @@ def test_connection() -> bool:
     except Exception as e:
         print(f"  ❌ Supabase connection failed: {e}")
         return False
+
+
+# ============================================================
+# RBAC HELPERS
+# ============================================================
+
+def get_user_role(user_id: str) -> str:
+    """
+    Fetch the role for a given user from the profiles table.
+
+    Strategy:
+      1. Check the in-process _role_cache first (avoids repeated DB hits per request).
+      2. Query profiles table via service_role key (bypasses RLS).
+      3. On any error or missing row, default to 'analyst' (least privilege).
+    """
+    if not user_id or user_id == SYSTEM_USER_ID:
+        return "analyst"  # Demo / unauthenticated sessions are always analyst
+
+    # Cache hit
+    if user_id in _role_cache:
+        return _role_cache[user_id]
+
+    try:
+        res = (
+            get_client()
+            .table("profiles")
+            .select("role")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        role = "analyst"  # safe default
+        if res.data and len(res.data) > 0:
+            role = res.data[0].get("role", "analyst") or "analyst"
+
+        _role_cache[user_id] = role  # Cache for this process lifetime
+        print(f"  🔐 RBAC: user={user_id[:8]}... role={role}")
+        return role
+    except Exception as e:
+        print(f"  ⚠️  get_user_role error (defaulting to analyst): {e}")
+        return "analyst"
+
+
+def is_superuser(user_id: str) -> bool:
+    """
+    Returns True if the user's role is in SUPERUSER_ROLES.
+    Superusers bypass all user_id-scoped filters and see the full dataset.
+    """
+    return get_user_role(user_id) in SUPERUSER_ROLES
+
+
+def _log_superuser_access(user_id: str, action: str) -> None:
+    """
+    Write an audit log entry whenever a superuser accesses global data.
+    Called internally — errors are silenced to never block the main query.
+    """
+    try:
+        role = get_user_role(user_id)
+        get_client().table("audit_logs").insert({
+            "user_id":    user_id,
+            "action":     f"SUPERUSER_{action}",
+            "metadata":   {
+                "role":      role,
+                "timestamp": datetime.datetime.utcnow().isoformat(),
+                "note":      "Global data access by privileged role"
+            }
+        }).execute()
+    except Exception:
+        pass  # Never let audit logging crash the main request
 
 
 # ── SAVE SCAN RESULT ───────────────────────────────────────────
@@ -165,17 +253,25 @@ def save_audit_log(
 
 # ── QUERY: RECENT SCANS ────────────────────────────────────────
 def get_recent_scans(user_id: str, limit: int = 20) -> list:
-    """Get the most recent scan results for a specific user."""
+    """
+    Get the most recent scan results.
+    Superusers (admin/jury/mentor/test) see ALL users' scans.
+    Analysts see only their own.
+    """
+    superuser = is_superuser(user_id)
+    if superuser:
+        _log_superuser_access(user_id, "READ_ALL_SCANS")
+
     try:
-        res = (
+        query = (
             get_client()
             .table("scan_results")
-            .select("id, domain, scan_version, pqc_score, risk_level, crypto_mode, crypto_agility_score, scan_duration_ms, created_at")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
+            .select("id, domain, scan_version, pqc_score, risk_level, crypto_mode, crypto_agility_score, scan_duration_ms, created_at, user_id")
         )
+        if not superuser:
+            query = query.eq("user_id", user_id)
+
+        res = query.order("created_at", desc=True).limit(limit).execute()
         return res.data or []
     except Exception as e:
         print(f"  ⚠️  get_recent_scans error: {e}")
@@ -184,17 +280,26 @@ def get_recent_scans(user_id: str, limit: int = 20) -> list:
 
 # ── QUERY: SCAN BY DOMAIN ──────────────────────────────────────
 def get_scans_by_domain(user_id: str, domain: str) -> list:
-    """Get all scans for a specific domain, filtered by user."""
+    """
+    Get all scans for a specific domain.
+    Superusers see results from ALL users for that domain.
+    Analysts see only their own scans for that domain.
+    """
+    superuser = is_superuser(user_id)
+    if superuser:
+        _log_superuser_access(user_id, f"READ_ALL_SCANS_DOMAIN_{domain}")
+
     try:
-        res = (
+        query = (
             get_client()
             .table("scan_results")
             .select("*")
-            .eq("user_id", user_id)
             .eq("domain", domain)
-            .order("created_at", desc=True)
-            .execute()
         )
+        if not superuser:
+            query = query.eq("user_id", user_id)
+
+        res = query.order("created_at", desc=True).execute()
         return res.data or []
     except Exception as e:
         print(f"  ⚠️  get_scans_by_domain error: {e}")
@@ -203,17 +308,26 @@ def get_scans_by_domain(user_id: str, domain: str) -> list:
 
 # ── QUERY: CBOM RECORDS ────────────────────────────────────────
 def get_cbom_records(user_id: str, limit: int = 50) -> list:
-    """Get CBOM records for scans owned by this user (via JOIN)."""
+    """
+    Get Cryptographic Bill of Materials records.
+    Superusers see ALL CBOM records across all users.
+    Analysts see only CBOM records from their own scans.
+    """
+    superuser = is_superuser(user_id)
+    if superuser:
+        _log_superuser_access(user_id, "READ_ALL_CBOM")
+
     try:
-        res = (
+        query = (
             get_client()
             .table("cbom_records")
             .select("*, scan_results!inner(user_id, domain, risk_level, created_at)")
-            .eq("scan_results.user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
         )
+        # For analysts: filter to only their own scans via the JOIN
+        if not superuser:
+            query = query.eq("scan_results.user_id", user_id)
+
+        res = query.order("created_at", desc=True).limit(limit).execute()
         return res.data or []
     except Exception as e:
         print(f"  ⚠️  get_cbom_records error: {e}")
@@ -222,17 +336,25 @@ def get_cbom_records(user_id: str, limit: int = 50) -> list:
 
 # ── QUERY: AUDIT LOGS ──────────────────────────────────────────
 def get_audit_logs(user_id: str, limit: int = 50) -> list:
-    """Get audit log entries for this user."""
+    """
+    Get audit log entries.
+    Superusers see the FULL system audit trail across all users.
+    Analysts see only their own audit entries.
+    """
+    superuser = is_superuser(user_id)
+    if superuser:
+        _log_superuser_access(user_id, "READ_ALL_AUDIT_LOGS")
+
     try:
-        res = (
+        query = (
             get_client()
             .table("audit_logs")
             .select("*")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
         )
+        if not superuser:
+            query = query.eq("user_id", user_id)
+
+        res = query.order("created_at", desc=True).limit(limit).execute()
         return res.data or []
     except Exception as e:
         print(f"  ⚠️  get_audit_logs error: {e}")
@@ -241,16 +363,26 @@ def get_audit_logs(user_id: str, limit: int = 50) -> list:
 
 # ── QUERY: DASHBOARD STATS ─────────────────────────────────────
 def get_dashboard_stats(user_id: str) -> dict:
-    """Compute aggregated stats for the dashboard per user from the assets inventory."""
+    """
+    Compute aggregated dashboard stats from the assets inventory.
+    Superusers see stats aggregated across ALL users (system-wide view).
+    Analysts see stats for their own assets only.
+    """
+    superuser = is_superuser(user_id)
+    if superuser:
+        _log_superuser_access(user_id, "READ_ALL_DASHBOARD_STATS")
+
     try:
-        # Get all assets for this user
-        res = (
+        # Superusers get the full inventory; analysts get own assets
+        query = (
             get_client()
             .table("assets")
             .select("asset_type, risk_level, ipv4, ipv6, scan_count")
-            .eq("user_id", user_id)
-            .execute()
         )
+        if not superuser:
+            query = query.eq("user_id", user_id)
+
+        res = query.execute()
         rows = res.data or []
         
         # Initialize counters with all expected keys to ensure zero-data safety
@@ -311,16 +443,25 @@ def init_db():
 
 # ── ASSETS ─────────────────────────────────────────────────────
 def get_assets(user_id: str) -> list:
-    """Get the full asset inventory for a specific user."""
+    """
+    Get the asset inventory.
+    Superusers see ALL assets across every user in the system.
+    Analysts see only their own registered assets.
+    """
+    superuser = is_superuser(user_id)
+    if superuser:
+        _log_superuser_access(user_id, "READ_ALL_ASSETS")
+
     try:
-        res = (
+        query = (
             get_client()
             .table("assets")
             .select("*")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .execute()
         )
+        if not superuser:
+            query = query.eq("user_id", user_id)
+
+        res = query.order("created_at", desc=True).execute()
         return res.data or []
     except Exception as e:
         print(f"  ⚠️  get_assets error: {e}")
@@ -377,9 +518,19 @@ def update_asset(user_id: str, asset_id: str, data: dict) -> bool:
         return False
 
 def get_nameservers(user_id: str, hostname: str = None) -> list:
-    """Get nameserver records for a user, optionally filtered by hostname."""
+    """
+    Get nameserver records.
+    Superusers see ALL nameserver records across every user.
+    Analysts see only records scoped to their account.
+    """
+    superuser = is_superuser(user_id)
+    if superuser:
+        _log_superuser_access(user_id, "READ_ALL_NAMESERVERS")
+
     try:
-        query = get_client().table("nameserver_records").select("*").eq("user_id", user_id)
+        query = get_client().table("nameserver_records").select("*")
+        if not superuser:
+            query = query.eq("user_id", user_id)
         if hostname:
             query = query.eq("hostname", hostname)
         res = query.order("created_at", desc=True).execute()
