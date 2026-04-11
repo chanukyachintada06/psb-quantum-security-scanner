@@ -339,7 +339,111 @@ def _safe_db(func, *args, **kwargs):
         return None
 
 
-# ── ERROR HANDLER ──────────────────────────────────────────────
+# ── REPORT GENERATION ─────────────────────────────────────────
+import re as _re
+from fastapi.responses import StreamingResponse
+from engine.report_generator import generate_pdf_report, generate_excel_report
+
+def _safe_filename(domain: str) -> str:
+    """Sanitize domain for use in a filename."""
+    safe = _re.sub(r"[^\w\-.]", "_", domain or "unknown")
+    return safe[:60]  # cap length
+
+@app.get(
+    "/api/report/pdf/{scan_id}",
+    summary="Download PDF report for a scan",
+    response_description="application/pdf file download",
+    tags=["Reports"],
+)
+async def get_pdf_report(scan_id: str, req: Request):
+    """
+    Generate and download an executive-style PDF report.
+    
+    - RBAC enforced: analysts see only their own scans.
+    - Returns 404 if scan_id not found or not accessible.
+    - No stack traces are leaked to the client.
+    """
+    user_id = extract_user_id(req)
+
+    try:
+        data = _safe_db(db.get_scan_for_report, scan_id=scan_id, user_id=user_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Scan not found or access denied.")
+
+        pdf_bytes = generate_pdf_report(data)
+
+        date_str  = data.get("generated_at", "")[:10]
+        safe_name = _safe_filename(data.get("domain", "unknown"))
+        filename  = f"QPS_Report_{safe_name}_{date_str}.pdf"
+
+        _safe_db(db.save_audit_log,
+                 action="REPORT_PDF_DOWNLOADED",
+                 user_id=user_id,
+                 domain=data.get("domain"),
+                 metadata={"scan_id": scan_id, "filename": filename})
+
+        return StreamingResponse(
+            iter([pdf_bytes]),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"  ⚠️  PDF report generation error: {e}")
+        raise HTTPException(status_code=500, detail="Report generation failed.")
+
+
+@app.get(
+    "/api/report/excel/{scan_id}",
+    summary="Download Excel report for a scan",
+    response_description="application/xlsx file download",
+    tags=["Reports"],
+)
+async def get_excel_report(scan_id: str, req: Request):
+    """
+    Generate and download a multi-sheet Excel (.xlsx) report.
+
+    Sheets: Summary · IP Node Details · Findings · Recommendations
+
+    - RBAC enforced: analysts see only their own scans.
+    - Returns 404 if scan_id not found or not accessible.
+    - No stack traces are leaked to the client.
+    """
+    user_id = extract_user_id(req)
+
+    try:
+        data = _safe_db(db.get_scan_for_report, scan_id=scan_id, user_id=user_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Scan not found or access denied.")
+
+        xlsx_bytes = generate_excel_report(data)
+
+        date_str  = data.get("generated_at", "")[:10]
+        safe_name = _safe_filename(data.get("domain", "unknown"))
+        filename  = f"QPS_Report_{safe_name}_{date_str}.xlsx"
+
+        _safe_db(db.save_audit_log,
+                 action="REPORT_EXCEL_DOWNLOADED",
+                 user_id=user_id,
+                 domain=data.get("domain"),
+                 metadata={"scan_id": scan_id, "filename": filename})
+
+        return StreamingResponse(
+            iter([xlsx_bytes]),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"  ⚠️  Excel report generation error: {e}")
+        raise HTTPException(status_code=500, detail="Report generation failed.")
+
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(

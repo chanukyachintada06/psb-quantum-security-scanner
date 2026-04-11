@@ -517,6 +517,7 @@ def update_asset(user_id: str, asset_id: str, data: dict) -> bool:
         print(f"  ⚠️  update_asset error: {e}")
         return False
 
+
 def get_nameservers(user_id: str, hostname: str = None) -> list:
     """
     Get nameserver records.
@@ -538,3 +539,106 @@ def get_nameservers(user_id: str, hostname: str = None) -> list:
     except Exception as e:
         print(f"  ⚠️  get_nameservers error: {e}")
         return []
+
+
+# ── QUERY: FULL SCAN FOR REPORT GENERATION ─────────────────────
+def get_scan_for_report(scan_id: str, user_id: str) -> dict | None:
+    """
+    Fetch a complete scan record (results + node details + findings)
+    for report generation.
+
+    RBAC rules:
+      - Superusers (admin/jury/mentor/test) can export any scan.
+      - Analysts can only export scans they own.
+
+    Returns a unified dict suitable for the report_generator module,
+    or None if the scan is not found / access is denied.
+    """
+    if not scan_id:
+        return None
+
+    super_user = is_superuser(user_id)
+    if super_user:
+        _log_superuser_access(user_id, f"REPORT_EXPORT_{scan_id[:8]}")
+
+    try:
+        # 1. Fetch scan summary row
+        query = (
+            get_client()
+            .table("scan_results")
+            .select("*")
+            .eq("id", scan_id)
+        )
+        # Analysts: enforce ownership
+        if not super_user:
+            query = query.eq("user_id", user_id)
+
+        res = query.limit(1).execute()
+        if not res.data:
+            return None
+        summary = res.data[0]
+
+        # 2. Fetch per-IP details
+        det_res = (
+            get_client()
+            .table("scan_details")
+            .select("*")
+            .eq("scan_id", scan_id)
+            .execute()
+        )
+        details_raw = det_res.data or []
+
+        # Normalize to the structure report_generator expects
+        ip_details = []
+        for d in details_raw:
+            ip_details.append({
+                "ip_address":    d.get("ip_address"),
+                "is_successful": d.get("is_successful", True),
+                "error_message": d.get("error_message"),
+                "tls": {
+                    "version":         d.get("tls_version"),
+                    "cipher_suite":    d.get("cipher_suite"),
+                    "key_exchange":    d.get("key_exchange"),
+                    "public_key_type": d.get("key_type"),
+                    "key_size":        d.get("key_size"),
+                },
+                "certificate": {
+                    "chain_status": d.get("certificate_chain_status", "UNKNOWN"),
+                },
+            })
+
+        # 3. Fetch findings
+        findings_res = (
+            get_client()
+            .table("scan_findings")
+            .select("*")
+            .eq("scan_id", scan_id)
+            .execute()
+        )
+        findings = findings_res.data or []
+
+        # 4. Compose unified dict for the report generator
+        return {
+            "scan_id":          scan_id,
+            "domain":           summary.get("domain"),
+            "scan_version":     summary.get("scan_version"),
+            "scan_duration_ms": summary.get("scan_duration_ms", 0),
+            "generated_at":     datetime.datetime.utcnow().isoformat(),
+            "generated_by":     summary.get("created_by", "Quantum Security Engine"),
+            "risk_profile": {
+                "risk_level":           summary.get("risk_level"),
+                "pqc_score":            summary.get("pqc_score"),
+                "crypto_agility_score": summary.get("crypto_agility_score"),
+                "quantum_risk_horizon": summary.get("quantum_risk_horizon"),
+                "hndl_risk":            summary.get("hndl_risk", False),
+                "confidence_score":     summary.get("confidence_score", 0),
+                "crypto_mode":          summary.get("crypto_mode"),
+            },
+            "ip_details": ip_details,
+            "findings":   findings,
+        }
+
+    except Exception as e:
+        print(f"  ⚠️  get_scan_for_report error: {e}")
+        return None
+

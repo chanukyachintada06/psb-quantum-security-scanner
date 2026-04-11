@@ -8,3 +8,5 @@ httpx
 supabase
 PyJWT
 dnspython
+reportlab
+openpyxl

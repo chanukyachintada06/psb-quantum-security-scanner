@@ -18,7 +18,10 @@ let reportingInitialized = false;
 let sidebarCollapsed = false;
 let demoMode = false;
 
-const API_BASE_URL = 'https://psb-hackathon2026.vercel.app';
+const API_BASE_URL = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1') 
+  ? 'http://localhost:8000' 
+  : window.location.origin;
+
 
 /* ============================================================
    1. MOCK DATA ENGINE
@@ -1151,6 +1154,9 @@ async function handleScan() {
     const engineData = transformScanData(rawApiResponse);
     AppState.currentScan = engineData;
     
+    // Capture scan_id from real API response (not available in demo mode)
+    const scanId = rawApiResponse && rawApiResponse.scan_id ? rawApiResponse.scan_id : null;
+    
     // 2. Phased Rendering
     DOM.engineResultsContainer.style.display = 'flex';
     
@@ -1162,6 +1168,8 @@ async function handleScan() {
     setTimeout(() => {
         renderEngineNodes(engineData);
         renderEngineFindings(engineData);
+        // Phase D: Export buttons (only when we have a real DB scan_id)
+        renderExportButtons(scanId, engineData.domain);
     }, 150);
 
     // Legacy Fallback mapping for history appending
@@ -1193,6 +1201,113 @@ async function handleScan() {
     }
   }
 }
+
+/* ============================================================
+   13B. EXPORT BUTTONS RENDERER
+   ============================================================ */
+
+/**
+ * Render PDF + Excel export buttons inside the engine results container.
+ * Buttons only appear when a real scan_id is available (non-demo mode).
+ *
+ * @param {string|null} scanId  - UUID from the backend API response
+ * @param {string}      domain  - Scanned domain name
+ */
+function renderExportButtons(scanId, domain) {
+  // Remove any previous export container
+  const existingContainer = document.getElementById('exportActionsContainer');
+  if (existingContainer) existingContainer.remove();
+
+  // No export in demo mode or without a real scan_id
+  if (!scanId || demoMode) return;
+
+  const container = document.createElement('div');
+  container.id = 'exportActionsContainer';
+  container.className = 'export-actions';
+
+  container.innerHTML = `
+    <div class="export-actions-label">
+      <span class="export-icon">📄</span>
+      <span>Export Report</span>
+    </div>
+    <div class="export-buttons-row">
+      <button
+        id="btnExportPdf"
+        class="btn-export btn-export-pdf"
+        title="Download Executive PDF Report"
+        aria-label="Export PDF Report for ${domain}"
+      >
+        <span class="btn-export-icon">📋</span>
+        <span class="btn-export-label">Export PDF</span>
+      </button>
+      <button
+        id="btnExportExcel"
+        class="btn-export btn-export-excel"
+        title="Download Multi-Sheet Excel Workbook"
+        aria-label="Export Excel Report for ${domain}"
+      >
+        <span class="btn-export-icon">📊</span>
+        <span class="btn-export-label">Export Excel</span>
+      </button>
+    </div>
+    <div class="export-hint">
+      Scan ID: <code>${scanId.substring(0, 8)}…</code>
+    </div>
+  `;
+
+  // PDF handler
+  container.querySelector('#btnExportPdf').addEventListener('click', async () => {
+    const btn = container.querySelector('#btnExportPdf');
+    btn.disabled = true;
+    btn.innerHTML = `<span class="btn-export-spinner"></span><span class="btn-export-label">Generating…</span>`;
+    try {
+      const url = `${API_BASE_URL}/api/report/pdf/${scanId}`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      console.error('PDF export failed:', e);
+    } finally {
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = `<span class="btn-export-icon">📋</span><span class="btn-export-label">Export PDF</span>`;
+      }, 2000);
+    }
+  });
+
+  // Excel handler
+  container.querySelector('#btnExportExcel').addEventListener('click', async () => {
+    const btn = container.querySelector('#btnExportExcel');
+    btn.disabled = true;
+    btn.innerHTML = `<span class="btn-export-spinner"></span><span class="btn-export-label">Generating…</span>`;
+    try {
+      const url = `${API_BASE_URL}/api/report/excel/${scanId}`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      console.error('Excel export failed:', e);
+    } finally {
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = `<span class="btn-export-icon">📊</span><span class="btn-export-label">Export Excel</span>`;
+      }, 2000);
+    }
+  });
+
+  // Insert at top of results container
+  DOM.engineResultsContainer.insertBefore(container, DOM.engineResultsContainer.firstChild);
+}
+
+
 
 /* ============================================================
    14. UTILITY
