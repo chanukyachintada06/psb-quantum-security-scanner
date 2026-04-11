@@ -71,13 +71,13 @@ async def startup_event():
 
     print("\n  Connecting to Supabase...")
     if db.test_connection():
-        print("  ✅ Supabase connected successfully!")
+        print("  [OK] Supabase connected successfully!")
         db.save_audit_log(
             action='SYSTEM_STARTUP',
             metadata={'description': 'Quantum-Proof Systems Scanner API started'}
         )
     else:
-        print("  ⚠️  Supabase not available — check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env")
+        print("  [WARN] Supabase not available — check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env")
     print()
 
 
@@ -391,7 +391,7 @@ async def get_pdf_report(scan_id: str, req: Request):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"  ⚠️  PDF report generation error: {e}")
+        print(f"  [WARN] PDF report generation error: {e}")
         raise HTTPException(status_code=500, detail="Report generation failed.")
 
 
@@ -439,7 +439,7 @@ async def get_excel_report(scan_id: str, req: Request):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"  ⚠️  Excel report generation error: {e}")
+        print(f"  [WARN] Excel report generation error: {e}")
         raise HTTPException(status_code=500, detail="Report generation failed.")
 
 

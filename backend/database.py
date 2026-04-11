@@ -62,7 +62,7 @@ def test_connection() -> bool:
         client.table("scan_results").select("id").limit(1).execute()
         return True
     except Exception as e:
-        print(f"  ❌ Supabase connection failed: {e}")
+        print(f"  [ERROR] Supabase connection failed: {e}")
         return False
 
 
@@ -207,7 +207,7 @@ def save_scan_result(user_id: str, scan_data: dict, created_by: str = None) -> s
         return scan_id
 
     except Exception as e:
-        print(f"  ⚠️  save_scan_result error: {e}")
+        print(f"  [WARN] save_scan_result error: {e}")
     return None
 
 
@@ -226,7 +226,7 @@ def save_cbom_record(scan_id: str, cbom_data: dict) -> None:
     try:
         get_client().table("cbom_records").insert(row).execute()
     except Exception as e:
-        print(f"  ⚠️  save_cbom_record error: {e}")
+        print(f"  [WARN] save_cbom_record error: {e}")
 
 
 # ── SAVE AUDIT LOG ─────────────────────────────────────────────
@@ -248,7 +248,7 @@ def save_audit_log(
     try:
         get_client().table("audit_logs").insert(row).execute()
     except Exception as e:
-        print(f"  ⚠️  save_audit_log error: {e}")
+        print(f"  [WARN] save_audit_log error: {e}")
 
 
 # ── QUERY: RECENT SCANS ────────────────────────────────────────
@@ -274,7 +274,7 @@ def get_recent_scans(user_id: str, limit: int = 20) -> list:
         res = query.order("created_at", desc=True).limit(limit).execute()
         return res.data or []
     except Exception as e:
-        print(f"  ⚠️  get_recent_scans error: {e}")
+        print(f"  [WARN] get_recent_scans error: {e}")
         return []
 
 
@@ -302,7 +302,7 @@ def get_scans_by_domain(user_id: str, domain: str) -> list:
         res = query.order("created_at", desc=True).execute()
         return res.data or []
     except Exception as e:
-        print(f"  ⚠️  get_scans_by_domain error: {e}")
+        print(f"  [WARN] get_scans_by_domain error: {e}")
         return []
 
 
@@ -330,7 +330,7 @@ def get_cbom_records(user_id: str, limit: int = 50) -> list:
         res = query.order("created_at", desc=True).limit(limit).execute()
         return res.data or []
     except Exception as e:
-        print(f"  ⚠️  get_cbom_records error: {e}")
+        print(f"  [WARN] get_cbom_records error: {e}")
         return []
 
 
@@ -357,7 +357,7 @@ def get_audit_logs(user_id: str, limit: int = 50) -> list:
         res = query.order("created_at", desc=True).limit(limit).execute()
         return res.data or []
     except Exception as e:
-        print(f"  ⚠️  get_audit_logs error: {e}")
+        print(f"  [WARN] get_audit_logs error: {e}")
         return []
 
 
@@ -423,7 +423,7 @@ def get_dashboard_stats(user_id: str) -> dict:
             
         return stats
     except Exception as e:
-        print(f"  ⚠️  get_dashboard_stats error: {e}")
+        print(f"  [WARN] get_dashboard_stats error: {e}")
         return {
             "total_assets": 0,
             "high_risk_assets_count": 0,
@@ -464,7 +464,7 @@ def get_assets(user_id: str) -> list:
         res = query.order("created_at", desc=True).execute()
         return res.data or []
     except Exception as e:
-        print(f"  ⚠️  get_assets error: {e}")
+        print(f"  [WARN] get_assets error: {e}")
         return []
 
 def add_asset(user_id: str, data: dict) -> dict | None:
@@ -485,7 +485,7 @@ def add_asset(user_id: str, data: dict) -> dict | None:
         res = get_client().table("assets").insert(row).execute()
         return res.data[0] if res.data else None
     except Exception as e:
-        print(f"  ⚠️  add_asset error: {e}")
+        print(f"  [WARN] add_asset error: {e}")
         return None
 
 def delete_asset(user_id: str, asset_id: str) -> bool:
@@ -494,7 +494,7 @@ def delete_asset(user_id: str, asset_id: str) -> bool:
         get_client().table("assets").delete().eq("user_id", user_id).eq("id", asset_id).execute()
         return True
     except Exception as e:
-        print(f"  ⚠️  delete_asset error: {e}")
+        print(f"  [WARN] delete_asset error: {e}")
         return False
 
 def update_asset(user_id: str, asset_id: str, data: dict) -> bool:
@@ -514,7 +514,7 @@ def update_asset(user_id: str, asset_id: str, data: dict) -> bool:
         get_client().table("assets").update(row).eq("user_id", user_id).eq("id", asset_id).execute()
         return True
     except Exception as e:
-        print(f"  ⚠️  update_asset error: {e}")
+        print(f"  [WARN] update_asset error: {e}")
         return False
 
 
@@ -537,7 +537,7 @@ def get_nameservers(user_id: str, hostname: str = None) -> list:
         res = query.order("created_at", desc=True).execute()
         return res.data or []
     except Exception as e:
-        print(f"  ⚠️  get_nameservers error: {e}")
+        print(f"  [WARN] get_nameservers error: {e}")
         return []
 
 
@@ -639,6 +639,6 @@ def get_scan_for_report(scan_id: str, user_id: str) -> dict | None:
         }
 
     except Exception as e:
-        print(f"  ⚠️  get_scan_for_report error: {e}")
+        print(f"  [WARN] get_scan_for_report error: {e}")
         return None
 
