@@ -16,26 +16,93 @@ from pydantic import BaseModel
 from engine.scan_service import execute_scan
 import database as db
 
-# ── JWT HELPER ─────────────────────────────────────────────────
-SYSTEM_USER_ID = os.getenv("SYSTEM_USER_ID", "00000000-0000-0000-0000-000000000000")
+import json
+
+# ── JWT AUTHENTICATION ─────────────────────────────────────────
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+JWT_VERIFICATION_KEY = None
+JWT_ALGORITHM = "HS256"
+
+jwk_path = os.path.join(os.path.dirname(__file__), "supabase_jwk.json")
+if os.path.exists(jwk_path):
+    try:
+        with open(jwk_path, "r") as f:
+            jwk_data = json.load(f)
+            JWT_VERIFICATION_KEY = jwt.PyJWK(jwk_data).key
+            JWT_ALGORITHM = jwk_data.get("alg", "ES256")
+    except Exception as e:
+        print(f"  ⚠️  Failed to load supabase_jwk.json: {e}")
+
+if not JWT_VERIFICATION_KEY:
+    JWT_VERIFICATION_KEY = SUPABASE_JWT_SECRET
 
 def extract_user_id(request: Request) -> str:
     """
-    Extract the Supabase user UUID from the Authorization: Bearer <JWT> header.
-    If the header is missing or invalid, fall back to SYSTEM_USER_ID (demo mode).
+    Extract and VERIFY the Supabase user UUID from the Authorization header.
+    Requirements:
+      1. Authorization: Bearer <JWT>
+      2. Valid signature (HS256) using SUPABASE_JWT_SECRET
+      3. Token must not be expired (exp)
+      4. Token must contain a valid 'sub' (subject) claim
+    Raises HTTP 401 Unauthorized for any failure.
     """
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        return SYSTEM_USER_ID
+        raise HTTPException(
+            status_code=401, 
+            detail="Unauthorized: Missing or invalid Authorization header"
+        )
+    
     token = auth_header[len("Bearer "):].strip()
+    
+    if not SUPABASE_JWT_SECRET:
+        # Fallback to a warning in logs if secret is missing, 
+        # but in production this should be a configuration error.
+        print("  ⚠️  CRITICAL: SUPABASE_JWT_SECRET is not set. Token verification will fail.")
+        raise HTTPException(
+            status_code=500, 
+            detail="Internal Server Error: Auth configuration missing"
+        )
+
     try:
-        # Decode WITHOUT verification — we trust Supabase issued it.
-        # For production: verify with Supabase JWT secret.
-        payload = jwt.decode(token, options={"verify_signature": False})
+        # Decode and VERIFY signature, expiry, and other claims strictly with the parsed key
+        payload = jwt.decode(
+            token, 
+            JWT_VERIFICATION_KEY, 
+            algorithms=[JWT_ALGORITHM],
+            options={"verify_exp": True}
+        )
+        
         uid = payload.get("sub")
-        return uid if uid else SYSTEM_USER_ID
-    except Exception:
-        return SYSTEM_USER_ID
+        if not uid:
+            raise HTTPException(
+                status_code=401, 
+                detail="Unauthorized: Token missing 'sub' claim"
+            )
+        return str(uid)
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Unauthorized: Token has expired")
+    except jwt.InvalidAlgorithmError:
+        # This is the most likely cause of "The specified alg value is not allowed"
+        try:
+            unverified_header = jwt.get_unverified_header(token)
+            alg = unverified_header.get("alg")
+            msg = f"Unauthorized: Algorithm '{alg}' not allowed. Expected '{JWT_ALGORITHM}'."
+            print(f"  ❌ JWT Auth Mismatch: {msg}")
+            raise HTTPException(status_code=401, detail=msg)
+        except HTTPException:
+            raise
+        except:
+            raise HTTPException(status_code=401, detail="Unauthorized: Invalid algorithm header")
+    except jwt.InvalidTokenError as e:
+        # Log common issues for debugging
+        print(f"  ❌ JWT invalid: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Unauthorized: Invalid token ({str(e)})")
+    except Exception as e:
+        if isinstance(e, HTTPException): raise e
+        print(f"  ❌ JWT exception: {str(e)}")
+        raise HTTPException(status_code=401, detail="Unauthorized: Authentication failed")
 
 # ── APP SETUP ──────────────────────────────────────────────────
 app = FastAPI(
@@ -52,7 +119,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -90,8 +157,8 @@ async def root():
         "team": "CypherRed261",
         "event": "PSB Hackathon 2026",
         "institution": "Lovely Professional University",
-        "version": "1.0.0",
-        "database": "MySQL (quantum_scanner_db)",
+        "version": "1.0.1",
+        "database": "Supabase (PostgreSQL)",
         "compliance": ["NIST FIPS 203", "NIST FIPS 204",
                        "NIST FIPS 205", "CERT-IN", "RBI CSF"],
     }
@@ -140,7 +207,7 @@ async def scan_post(request: ScanRequest, req: Request):
         email = "unknown"
         if token:
             try:
-                payload = jwt.decode(token, options={"verify_signature": False})
+                payload = jwt.decode(token, algorithms=[JWT_ALGORITHM], options={"verify_signature": False})
                 email = payload.get("email", "unknown")
             except: pass
 
@@ -258,6 +325,61 @@ async def get_domain_history(domain: str, req: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/compare-assets", summary="Compare assets by specific scan IDs")
+async def compare_assets(req: Request, ids: str = ""):
+    """Compare specific scans. Pass comma-separated UUIDs in 'ids' query."""
+    user_id = extract_user_id(req)
+    if not ids:
+        raise HTTPException(status_code=400, detail="Missing 'ids' parameter")
+    scan_ids = [s.strip() for s in ids.split(",") if s.strip()]
+    
+    comparisons = db.get_scans_by_ids(user_id, scan_ids)
+    return {"comparisons": comparisons}
+
+@app.get("/api/compare-assets-by-domain", summary="Compare latest scans for given domains")
+async def compare_assets_domains(req: Request, domains: str = ""):
+    """Compare assets by their domain. Fetches the latest scan for each. Pass comma-separated domains."""
+    user_id = extract_user_id(req)
+    if not domains:
+        raise HTTPException(status_code=400, detail="Missing 'domains' parameter")
+    domain_list = [d.strip() for d in domains.split(",") if d.strip()]
+    
+    comparisons = db.get_latest_scans_by_domains(user_id, domain_list)
+    return {"comparisons": comparisons}
+
+@app.get("/api/asset-trends/{domain}", summary="Get trend analysis for an asset")
+async def get_asset_trends(domain: str, req: Request):
+    """Returns historical scans sorted old-to-new, with average metrics."""
+    user_id = extract_user_id(req)
+    scans = db.get_scans_by_domain(user_id, domain)
+    if not scans:
+        return {"trends": [], "average_pqc_score": 0, "average_agility_score": 0, "latest_risk_level": "UNKNOWN"}
+    
+    scans.sort(key=lambda x: x["created_at"])  # Ascending for charts
+    
+    trends = []
+    total_pqc = 0
+    total_agility = 0
+    for s in scans:
+        p_val = s.get("pqc_score") or 0
+        a_val = s.get("crypto_agility_score") or 0
+        total_pqc += p_val
+        total_agility += a_val
+        trends.append({
+            "scan_date": s.get("created_at"),
+            "pqc_score": p_val,
+            "agility_score": a_val,
+            "risk_level": s.get("risk_level", "UNKNOWN")
+        })
+    
+    count = len(scans)
+    return {
+        "trends": trends,
+        "average_pqc_score": round(total_pqc / count),
+        "average_agility_score": round(total_agility / count),
+        "latest_risk_level": scans[-1].get("risk_level", "UNKNOWN")
+    }
+
 
 # ── ASSETS ─────────────────────────────────────────────────────
 
@@ -273,7 +395,7 @@ async def add_asset_item(request: Request):
     email = "unknown"
     if token:
         try:
-            payload = jwt.decode(token, options={"verify_signature": False})
+            payload = jwt.decode(token, algorithms=[JWT_ALGORITHM], options={"verify_signature": False})
             email = payload.get("email", "unknown")
         except: pass
     
@@ -304,7 +426,7 @@ async def update_asset_endpoint(asset_id: str, request: Request):
     email = "unknown"
     if token:
         try:
-            payload = jwt.decode(token, options={"verify_signature": False})
+            payload = jwt.decode(token, algorithms=[JWT_ALGORITHM], options={"verify_signature": False})
             email = payload.get("email", "unknown")
         except: pass
     
@@ -446,6 +568,11 @@ async def get_excel_report(scan_id: str, req: Request):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail}
+        )
     return JSONResponse(
         status_code=500,
         content={"detail": f"Internal server error: {str(exc)}"}

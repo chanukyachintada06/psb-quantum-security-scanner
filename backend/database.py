@@ -20,12 +20,13 @@ import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
-load_dotenv()
+# Ensure we always load .env from the backend directory regardless of cwd
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(dotenv_path=env_path, override=True)
 
 # ── SUPABASE CLIENT (service_role — bypasses RLS) ─────────────
 # Try multiple naming conventions for maximum resilience on deployment
-SUPABASE_URL: str = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
-SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY", "")
+# Variables are loaded dynamically in get_client() to prevent Uvicorn reload caching issues.
 
 # System fallback user_id for demo / unauthenticated scans
 SYSTEM_USER_ID: str = os.getenv("SYSTEM_USER_ID", "00000000-0000-0000-0000-000000000000")
@@ -46,11 +47,14 @@ def get_client() -> Client:
     """Return (and lazily initialise) the Supabase service-role client."""
     global _supabase
     if _supabase is None:
-        if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
+        key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY", "")
+        
+        if not url or not key:
             raise RuntimeError(
                 "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env"
             )
-        _supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        _supabase = create_client(url, key)
     return _supabase
 
 
@@ -303,6 +307,49 @@ def get_scans_by_domain(user_id: str, domain: str) -> list:
         return res.data or []
     except Exception as e:
         print(f"  [WARN] get_scans_by_domain error: {e}")
+        return []
+
+# ── QUERY: COMPARE SCANS ───────────────────────────────────────
+def get_scans_by_ids(user_id: str, scan_ids: list) -> list:
+    """Fetch comparative scans given a list of IDs."""
+    superuser = is_superuser(user_id)
+    if superuser:
+        _log_superuser_access(user_id, "COMPARE_SCANS_IDS")
+    
+    try:
+        query = get_client().table("scan_results").select("id, domain, scan_version, pqc_score, risk_level, crypto_mode, crypto_agility_score, quantum_risk_horizon, hndl_risk, scan_duration_ms, created_at, user_id").in_("id", scan_ids)
+        if not superuser:
+            query = query.eq("user_id", user_id)
+        res = query.execute()
+        return res.data or []
+    except Exception as e:
+        print(f"  [WARN] get_scans_by_ids error: {e}")
+        return []
+
+def get_latest_scans_by_domains(user_id: str, domains: list) -> list:
+    """Fetch the latest scan for each of the requested domains."""
+    superuser = is_superuser(user_id)
+    if superuser:
+        _log_superuser_access(user_id, "COMPARE_SCANS_DOMAINS")
+    
+    scans = []
+    try:
+        query = get_client().table("scan_results").select("id, domain, scan_version, pqc_score, risk_level, crypto_mode, crypto_agility_score, quantum_risk_horizon, hndl_risk, scan_duration_ms, created_at, user_id").in_("domain", domains)
+        if not superuser:
+            query = query.eq("user_id", user_id)
+        
+        # We fetch ordered by created_at DESC, then deduplicate by domain locally
+        res = query.order("created_at", desc=True).execute()
+        
+        if res.data:
+            seen_domains = set()
+            for row in res.data:
+                if row["domain"] not in seen_domains:
+                    scans.append(row)
+                    seen_domains.add(row["domain"])
+        return scans
+    except Exception as e:
+        print(f"  [WARN] get_latest_scans_by_domains error: {e}")
         return []
 
 
@@ -637,6 +684,22 @@ def get_scan_for_report(scan_id: str, user_id: str) -> dict | None:
             "ip_details": ip_details,
             "findings":   findings,
         }
+        
+        # Inject historical trend data for the PDF Generator
+        try:
+             history = get_scans_by_domain(user_id, summary.get("domain", ""))
+             if history and len(history) > 1:
+                 # Ensure chronologically sorted old-to-new
+                 history.sort(key=lambda x: x.get("created_at", ""))
+                 ret["historical_trends"] = [{
+                     "scan_date": h.get("created_at"),
+                     "pqc_score": h.get("pqc_score"),
+                     "risk_level": h.get("risk_level")
+                 } for h in history]
+        except Exception as trend_e:
+             print(f"  [WARN] Failed to inject trends into report: {trend_e}")
+             
+        return ret
 
     except Exception as e:
         print(f"  [WARN] get_scan_for_report error: {e}")

@@ -1,0 +1,3 @@
+ALTER TABLE public.scan_results
+ADD COLUMN IF NOT EXISTS quantum_risk_horizon TEXT,
+ADD COLUMN IF NOT EXISTS hndl_risk BOOLEAN DEFAULT FALSE;

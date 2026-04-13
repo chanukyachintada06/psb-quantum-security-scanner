@@ -18,7 +18,9 @@ let reportingInitialized = false;
 let sidebarCollapsed = false;
 let demoMode = false;
 
-const API_BASE_URL = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1') 
+const API_BASE_URL = window.location.origin.includes('localhost') || 
+                     window.location.origin.includes('127.0.0.1') || 
+                     window.location.protocol === 'file:'
   ? 'http://localhost:8000' 
   : window.location.origin;
 
@@ -163,6 +165,7 @@ const Router = {
       }
     }
     if (sectionId === 'reporting') initReporting();
+    if (sectionId === 'benchmarking') initBenchmarking();
 
     // update browser hash
     window.location.hash = sectionId;
@@ -181,7 +184,7 @@ const Router = {
     // Handle hash on load
     const validSections = [
       'home', 'asset-inventory', 'asset-discovery',
-      'cbom', 'posture-pqc', 'cyber-rating', 'reporting'
+      'cbom', 'posture-pqc', 'cyber-rating', 'reporting', 'benchmarking'
     ];
     let hashSection = window.location.hash.replace('#', '');
     if (!validSections.includes(hashSection)) {
@@ -368,10 +371,14 @@ const DOM = {
   engineDomainName: document.getElementById('engineDomainName'),
   enginePqcScore: document.getElementById('enginePqcScore'),
   engineAgilityScore: document.getElementById('engineAgilityScore'),
+  engineRiskHorizon: document.getElementById('engineRiskHorizon'),
   engineRiskLevel: document.getElementById('engineRiskLevel'),
   engineTopRiskNode: document.getElementById('engineTopRiskNode'),
   engineNodeTableBody: document.getElementById('engineNodeTableBody'),
   engineFindingsGrid: document.getElementById('engineFindingsGrid'),
+  engineExportActions: document.getElementById('engineExportActions'),
+  btnExportPdf: document.getElementById('btnExportPdf'),
+  btnExportExcel: document.getElementById('btnExportExcel'),
 
   tableEmptyState: document.getElementById('tableEmptyState'),
   tableWrapper: document.getElementById('tableWrapper'),
@@ -514,6 +521,26 @@ function renderEngineSummary(data) {
    DOM.engineDomainName.textContent = data.domain;
    DOM.enginePqcScore.textContent = data.summary.pqc_score;
    DOM.engineAgilityScore.textContent = data.summary.crypto_agility_score;
+   DOM.engineRiskHorizon.textContent = data.summary.quantum_risk_horizon || 'N/A';
+   
+   const cryptoModeEl = document.getElementById('engineCryptoMode');
+   if (cryptoModeEl) {
+       cryptoModeEl.textContent = data.summary.crypto_mode || 'UNKNOWN';
+       cryptoModeEl.style.color = '#fff';
+       if (data.summary.crypto_mode === 'CLASSICAL') {
+           cryptoModeEl.style.backgroundColor = 'var(--pnb-red)';
+           cryptoModeEl.style.borderColor = 'rgba(196, 18, 48, 0.4)';
+       } else if (data.summary.crypto_mode === 'HYBRID') {
+           cryptoModeEl.style.backgroundColor = 'var(--pnb-warning)';
+           cryptoModeEl.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+       } else if (data.summary.crypto_mode === 'PQC_READY') {
+           cryptoModeEl.style.backgroundColor = 'var(--pnb-success)';
+           cryptoModeEl.style.borderColor = 'rgba(34, 197, 94, 0.4)';
+       } else {
+           cryptoModeEl.style.backgroundColor = 'var(--pnb-text-dim)';
+           cryptoModeEl.style.borderColor = 'transparent';
+       }
+   }
    
    DOM.engineRiskLevel.textContent = data.summary.risk_level;
    DOM.engineRiskLevel.style.color = 'var(--pnb-text)';
@@ -639,6 +666,7 @@ function clearEngineUI() {
     DOM.engineSummaryCard.style.opacity = '0';
     DOM.engineNodeTableBody.innerHTML = '';
     DOM.engineFindingsGrid.innerHTML = '';
+    if (DOM.engineExportActions) DOM.engineExportActions.style.display = 'none';
 }
 
 /* ============================================================
@@ -751,7 +779,18 @@ async function fetchAssetsFromSupabase() {
     const response = await fetch(`${API_BASE_URL}/api/assets`, {
       headers: typeof authHeaders === 'function' ? authHeaders() : {}
     });
-    if (!response.ok) return;
+    
+    if (!response.ok) {
+        console.warn('Assets fetch failed:', response.status);
+        const tbody = document.getElementById('homeAssetTableBody');
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 40px; color: var(--pnb-danger);">
+                FAILED TO LOAD ASSETS: ${response.status === 401 ? 'Authentication Error' : 'Server Error'}
+            </td></tr>`;
+        }
+        return;
+    }
+
     const data = await response.json();
     AppState.assetsInventory = data.assets || [];
     renderAssetsTable();
@@ -759,6 +798,8 @@ async function fetchAssetsFromSupabase() {
     if (Router.currentSection === 'asset-discovery') renderAssetDiscovery();
   } catch (err) {
     console.warn('Failed to fetch assets:', err);
+    const tbody = document.getElementById('homeAssetTableBody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 40px; color: var(--pnb-danger);">Network error while loading assets.</td></tr>`;
   }
 }
 
@@ -898,12 +939,23 @@ async function fetchNameservers(domain = null) {
     const response = await fetch(url, {
       headers: typeof authHeaders === 'function' ? authHeaders() : {}
     });
-    if (!response.ok) return;
+    if (!response.ok) {
+        console.warn('Nameserver fetch error:', response.status);
+        const tbody = document.getElementById('nameserverTableBody');
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 20px; color: var(--pnb-danger);">Failed to load nameservers (${response.status})</td></tr>`;
+        }
+        return;
+    }
     const data = await response.json();
     AppState.nameservers = data.nameservers || [];
     renderNameserverTable();
   } catch (err) {
     console.warn('Nameserver fetch error:', err);
+    const tbody = document.getElementById('nameserverTableBody');
+    if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 20px; color: var(--pnb-danger);">Network error while loading nameservers</td></tr>`;
+    }
   }
 }
 
@@ -936,7 +988,11 @@ async function fetchAuditLogs() {
     const response = await fetch(`${API_BASE_URL}/api/audit`, {
       headers: typeof authHeaders === "function" ? authHeaders() : {}
     });
-    if (!response.ok) return;
+    if (!response.ok) {
+        console.warn("Audit logs fetch error:", response.status);
+        renderActivityFeed([{ action: "FETCH_ERROR", created_at: new Date(), domain: `Error ${response.status}` }]);
+        return;
+    }
     const data = await response.json();
     renderActivityFeed(data.audit_logs || []);
   } catch (err) {
@@ -998,7 +1054,10 @@ async function fetchDashboardStats() {
     const response = await fetch(`${API_BASE_URL}/api/stats`, {
       headers: typeof authHeaders === 'function' ? authHeaders() : {}
     });
-    if (!response.ok) return;
+    if (!response.ok) {
+      console.warn('[Dashboard] Stats fetch error:', response.status);
+      return;
+    }
     const data = await response.json();
     updateDashboardStatsUI(data);
   } catch (err) {
@@ -1164,12 +1223,17 @@ async function handleScan() {
     renderEngineSummary(engineData);
     DOM.engineSummaryCard.style.opacity = '1';
     
-    // Phase B & C: Nodes and Findings flow sequentially
     setTimeout(() => {
         renderEngineNodes(engineData);
         renderEngineFindings(engineData);
-        // Phase D: Export buttons (only when we have a real DB scan_id)
-        renderExportButtons(scanId, engineData.domain);
+        
+        // Show Export buttons only when we have a real DB scan_id and not in demo mode
+        if (scanId && !demoMode) {
+            if (DOM.engineExportActions) DOM.engineExportActions.style.display = 'block';
+            setupExportHandlers(scanId, engineData.domain);
+        } else {
+            if (DOM.engineExportActions) DOM.engineExportActions.style.display = 'none';
+        }
     }, 150);
 
     // Legacy Fallback mapping for history appending
@@ -1202,109 +1266,100 @@ async function handleScan() {
   }
 }
 
-/* ============================================================
-   13B. EXPORT BUTTONS RENDERER
-   ============================================================ */
+/**
+ * Setup Click listeners for Export buttons using authenticated download flow.
+ */
+function setupExportHandlers(scanId, domain) {
+    if (!DOM.btnExportPdf || !DOM.btnExportExcel) return;
+
+    // Reset buttons state
+    DOM.btnExportPdf.disabled = false;
+    DOM.btnExportExcel.disabled = false;
+
+    // Cleanup existing listeners by clone/replace approach if needed, 
+    // but here we'll just use onclick for simplicity/reliability in this context
+    DOM.btnExportPdf.onclick = async () => {
+        DOM.btnExportPdf.disabled = true;
+        const originalText = DOM.btnExportPdf.innerHTML;
+        DOM.btnExportPdf.innerHTML = `<span class="btn-export-spinner"></span><span class="btn-export-label">Generating...</span>`;
+        try {
+            await authenticatedDownload(
+                `${API_BASE_URL}/api/report/pdf/${scanId}`,
+                `quantum-report-${domain}.pdf`
+            );
+            showExportToast('✅ PDF report downloaded successfully!');
+        } catch (e) {
+            showExportToast(`❌ ${e.message || 'Failed to generate PDF'}`, true);
+        } finally {
+            DOM.btnExportPdf.disabled = false;
+            DOM.btnExportPdf.innerHTML = originalText;
+        }
+    };
+
+    DOM.btnExportExcel.onclick = async () => {
+        DOM.btnExportExcel.disabled = true;
+        const originalText = DOM.btnExportExcel.innerHTML;
+        DOM.btnExportExcel.innerHTML = `<span class="btn-export-spinner"></span><span class="btn-export-label">Generating...</span>`;
+        try {
+            await authenticatedDownload(
+                `${API_BASE_URL}/api/report/excel/${scanId}`,
+                `quantum-report-${domain}.xlsx`
+            );
+            showExportToast('✅ Excel workbook downloaded successfully!');
+        } catch (e) {
+            showExportToast(`❌ ${e.message || 'Failed to generate Excel'}`, true);
+        } finally {
+            DOM.btnExportExcel.disabled = false;
+            DOM.btnExportExcel.innerHTML = originalText;
+        }
+    };
+}
 
 /**
- * Render PDF + Excel export buttons inside the engine results container.
- * Buttons only appear when a real scan_id is available (non-demo mode).
- *
- * @param {string|null} scanId  - UUID from the backend API response
- * @param {string}      domain  - Scanned domain name
+ * Shared authenticated download helper
  */
-function renderExportButtons(scanId, domain) {
-  // Remove any previous export container
-  const existingContainer = document.getElementById('exportActionsContainer');
-  if (existingContainer) existingContainer.remove();
+async function authenticatedDownload(endpoint, filename) {
+    const token = getJWT();
+    const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
-  // No export in demo mode or without a real scan_id
-  if (!scanId || demoMode) return;
-
-  const container = document.createElement('div');
-  container.id = 'exportActionsContainer';
-  container.className = 'export-actions';
-
-  container.innerHTML = `
-    <div class="export-actions-label">
-      <span class="export-icon">📄</span>
-      <span>Export Report</span>
-    </div>
-    <div class="export-buttons-row">
-      <button
-        id="btnExportPdf"
-        class="btn-export btn-export-pdf"
-        title="Download Executive PDF Report"
-        aria-label="Export PDF Report for ${domain}"
-      >
-        <span class="btn-export-icon">📋</span>
-        <span class="btn-export-label">Export PDF</span>
-      </button>
-      <button
-        id="btnExportExcel"
-        class="btn-export btn-export-excel"
-        title="Download Multi-Sheet Excel Workbook"
-        aria-label="Export Excel Report for ${domain}"
-      >
-        <span class="btn-export-icon">📊</span>
-        <span class="btn-export-label">Export Excel</span>
-      </button>
-    </div>
-    <div class="export-hint">
-      Scan ID: <code>${scanId.substring(0, 8)}…</code>
-    </div>
-  `;
-
-  // PDF handler
-  container.querySelector('#btnExportPdf').addEventListener('click', async () => {
-    const btn = container.querySelector('#btnExportPdf');
-    btn.disabled = true;
-    btn.innerHTML = `<span class="btn-export-spinner"></span><span class="btn-export-label">Generating…</span>`;
-    try {
-      const url = `${API_BASE_URL}/api/report/pdf/${scanId}`;
-      const a = document.createElement('a');
-      a.href = url;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {
-      console.error('PDF export failed:', e);
-    } finally {
-      setTimeout(() => {
-        btn.disabled = false;
-        btn.innerHTML = `<span class="btn-export-icon">📋</span><span class="btn-export-label">Export PDF</span>`;
-      }, 2000);
+    const response = await fetch(endpoint, { headers });
+    if (!response.ok) {
+        let detail = 'Failed to generate report';
+        try {
+            const errJson = await response.clone().json();
+            if (errJson && errJson.detail) detail = errJson.detail;
+        } catch (_) {}
+        throw new Error(detail);
     }
-  });
 
-  // Excel handler
-  container.querySelector('#btnExportExcel').addEventListener('click', async () => {
-    const btn = container.querySelector('#btnExportExcel');
-    btn.disabled = true;
-    btn.innerHTML = `<span class="btn-export-spinner"></span><span class="btn-export-label">Generating…</span>`;
-    try {
-      const url = `${API_BASE_URL}/api/report/excel/${scanId}`;
-      const a = document.createElement('a');
-      a.href = url;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {
-      console.error('Excel export failed:', e);
-    } finally {
-      setTimeout(() => {
-        btn.disabled = false;
-        btn.innerHTML = `<span class="btn-export-icon">📊</span><span class="btn-export-label">Export Excel</span>`;
-      }, 2000);
-    }
-  });
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+}
 
-  // Insert at top of results container
-  DOM.engineResultsContainer.insertBefore(container, DOM.engineResultsContainer.firstChild);
+/**
+ * Toast helper for export status
+ */
+function showExportToast(msg, isError = false) {
+    const toast = document.getElementById('reportToast');
+    if (!toast) return;
+    toast.textContent = msg;
+    toast.style.background = isError ? 'rgba(239,68,68,0.15)' : '';
+    toast.style.color      = isError ? '#EF4444'              : '';
+    toast.style.border     = isError ? '1px solid rgba(239,68,68,0.4)' : '';
+    toast.style.display = 'block';
+    setTimeout(() => {
+        toast.style.display = 'none';
+        toast.style.background = '';
+        toast.style.color      = '';
+        toast.style.border     = '';
+    }, 4000);
 }
 
 
@@ -1395,7 +1450,7 @@ function init() {
     'background:#C41230;color:white;font-weight:bold;padding:4px 8px;border-radius:4px');
   console.log('%c Team CypherRed261 | PSB Hackathon 2026 | LPU ',
     'background:#F5A623;color:#0D0D0F;font-weight:bold;padding:4px 8px;border-radius:4px');
-  console.log('%c All 7 modules initialized successfully âœ“ ',
+  console.log('%c All 7 modules initialized successfully ✓ ',
     'background:#22C55E;color:white;font-weight:bold;padding:4px 8px;border-radius:4px');
 }
 
@@ -1610,16 +1665,21 @@ const centerTextPlugin = {
     ctx.restore();
   }
 };
+
 async function fetchCBOMData() {
   try {
     const response = await fetch(`${API_BASE_URL}/api/cbom`, {
       headers: typeof authHeaders === 'function' ? authHeaders() : {}
     });
-    if (!response.ok) return;
+    if (!response.ok) {
+        console.warn('CBOM fetch error:', response.status);
+        const tbody = document.querySelector('.cbom-cipher-table tbody');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 20px; color: var(--pnb-danger);">Failed to load CBOM data.</td></tr>`;
+        return;
+    }
     const data = await response.json();
     const records = data.cbom_records || [];
     
-    // 1. Update stats cards
     const totalApps = new Set(records.map(r => r.scan_results?.domain)).size;
     const activeCerts = records.filter(r => r.nist_standard).length;
     const weakCrypto = records.filter(r => r.pqc_status === 'VULNERABLE').length;
@@ -2444,7 +2504,18 @@ async function handleLogout() {
 // â”€â”€ Init login system â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function initLoginSystem() {
 
-  // 1. Patch handleScan: inject JWT into backend fetch calls
+  // 1. Wire up login button IMMEDIATELY
+  var loginBtn = $id('loginBtn');
+  if (loginBtn) loginBtn.onclick = handleLoginClick;
+
+  ['loginUsername', 'loginPassword'].forEach(function(id) {
+    var el = $id(id);
+    if (el) el.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') handleLoginClick();
+    });
+  });
+
+  // 2. Patch handleScan: inject JWT into backend fetch calls
   const _origHandleScan = window.handleScan || handleScan;
   window.handleScan = async function() {
     const _origFetch = window.fetch;
@@ -2463,16 +2534,6 @@ async function initLoginSystem() {
     }
   };
 
-  // 2. Wire up login button SYNCHRONOUSLY first
-  var loginBtn = $id('loginBtn');
-  if (loginBtn) loginBtn.onclick = handleLoginClick;
-
-  ['loginUsername', 'loginPassword'].forEach(function(id) {
-    var el = $id(id);
-    if (el) el.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') handleLoginClick();
-    });
-  });
 
   var toggle = $id('loginPwdToggle');
   var pwdInput = $id('loginPassword');
@@ -2523,3 +2584,200 @@ async function initLoginSystem() {
 // Run after DOM fully loaded
 window.addEventListener('load', initLoginSystem);
 
+
+/* ============================================================
+   XX. STRATEGIC BENCHMARKING (COMPARISONS & TRENDS)
+   ============================================================ */
+
+let globalTrendChart = null;
+let benchmarkingInitialized = false;
+
+function initBenchmarking() {
+  if (benchmarkingInitialized) return;
+  benchmarkingInitialized = true;
+  
+  // Populate Domain Dropdown for Trends
+  const trendSelect = document.getElementById('trendDomainSelect');
+  if (trendSelect && AppState.assetsInventory) {
+      // Use standard assets
+      const uniqueDomains = [...new Set(AppState.assetsInventory.map(a => a.name))].filter(Boolean);
+      uniqueDomains.forEach(domain => {
+          const opt = document.createElement('option');
+          opt.value = domain;
+          opt.textContent = domain;
+          trendSelect.appendChild(opt);
+      });
+  }
+
+  // Bind Load Trend Button
+  document.getElementById('btnLoadTrend')?.addEventListener('click', () => {
+      const domain = document.getElementById('trendDomainSelect').value;
+      if (!domain) return;
+      fetchAndRenderTrends(domain);
+  });
+
+  // Bind Compare Domains Button
+  document.getElementById('btnCompareDomains')?.addEventListener('click', () => {
+      const domains = document.getElementById('compareDomainsInput').value;
+      if (!domains.trim()) return;
+      fetchAndRenderComparison(domains);
+  });
+}
+
+async function fetchAndRenderTrends(domain) {
+  try {
+      const btn = document.getElementById('btnLoadTrend');
+      btn.textContent = "Loading...";
+      const res = await fetch(`${API_BASE_URL}/api/asset-trends/${encodeURIComponent(domain)}`, {
+          headers: typeof authHeaders === 'function' ? authHeaders() : {}
+      });
+      btn.textContent = "Load Trend";
+      if (!res.ok) throw new Error("Failed to load trends");
+      const data = await res.json();
+      
+      const emptyState = document.getElementById('trendEmptyState');
+      const chartContainer = document.getElementById('trendChartContainer');
+      
+      if (!data.trends || data.trends.length === 0) {
+          emptyState.style.display = 'block';
+          chartContainer.style.display = 'none';
+          emptyState.querySelector('.empty-desc').textContent = "No scan history available for this domain.";
+          return;
+      }
+      
+      emptyState.style.display = 'none';
+      chartContainer.style.display = 'block';
+      
+      document.getElementById('trendAvgPqc').textContent = data.average_pqc_score;
+      document.getElementById('trendAvgAgility').textContent = data.average_agility_score;
+      document.getElementById('trendLatestRisk').textContent = data.latest_risk_level;
+      
+      // If Risk is critical/high make it red
+      const riskEl = document.getElementById('trendLatestRisk');
+      riskEl.style.color = ['CRITICAL','HIGH'].includes(data.latest_risk_level) ? 'var(--pnb-red)' : 'var(--pnb-text)';
+      
+      const labels = data.trends.map(t => new Date(t.scan_date).toLocaleDateString('en-GB', { day:'numeric', month:'short' }));
+      const pqcData = data.trends.map(t => t.pqc_score);
+      const agilityData = data.trends.map(t => t.agility_score);
+      
+      const ctx = document.getElementById('trendChartCanvas').getContext('2d');
+      if (globalTrendChart) globalTrendChart.destroy();
+      
+      globalTrendChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+              labels: labels,
+              datasets: [
+                  {
+                      label: 'PQC Score',
+                      data: pqcData,
+                      borderColor: '#3B82F6', // pnb-info
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      tension: 0.3,
+                      fill: true,
+                      borderWidth: 2
+                  },
+                  {
+                      label: 'Agility Score',
+                      data: agilityData,
+                      borderColor: '#22C55E', // pnb-success
+                      backgroundColor: 'transparent',
+                      borderDash: [5, 5],
+                      tension: 0.3,
+                      fill: false,
+                      borderWidth: 2
+                  }
+              ]
+          },
+          options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                  legend: { position: 'bottom' },
+                  tooltip: { mode: 'index', intersect: false }
+              },
+              scales: {
+                  y: { min: 0, max: 100, grid: { color: 'rgba(0,0,0,0.05)' } },
+                  x: { grid: { display: false } }
+              }
+          }
+      });
+
+  } catch (e) {
+      const btn = document.getElementById('btnLoadTrend');
+      if (btn) btn.textContent = "Load Trend";
+      console.warn("Trend load error", e);
+  }
+}
+
+async function fetchAndRenderComparison(domains) {
+  try {
+      const btn = document.getElementById('btnCompareDomains');
+      btn.textContent = "Loading...";
+      const res = await fetch(`${API_BASE_URL}/api/compare-assets-by-domain?domains=${encodeURIComponent(domains)}`, {
+          headers: typeof authHeaders === 'function' ? authHeaders() : {}
+      });
+      btn.textContent = "Compare Domains";
+      if (!res.ok) throw new Error("Failed to load comparison");
+      const data = await res.json();
+      
+      const emptyState = document.getElementById('compareEmptyState');
+      const tableContainer = document.getElementById('compareTableContainer');
+      
+      if (!data.comparisons || data.comparisons.length === 0) {
+          emptyState.style.display = 'block';
+          tableContainer.style.display = 'none';
+          emptyState.querySelector('.empty-desc').textContent = "No valid domains found in recent scans.";
+          return;
+      }
+      
+      emptyState.style.display = 'none';
+      tableContainer.style.display = 'block';
+      
+      const thead = document.getElementById('compareTableHeadRow');
+      const tbody = document.getElementById('compareTableBody');
+      
+      thead.innerHTML = `
+          <th>Metric / Attribute</th>
+          ${data.comparisons.map(c => `<th style="text-align:center;">${c.domain}</th>`).join('')}
+      `;
+      
+      // Calculate best/worst for coloring
+      const pqcScores = data.comparisons.map(c => c.pqc_score || 0);
+      const maxPqc = Math.max(...pqcScores);
+      const minPqc = Math.min(...pqcScores);
+      
+      const configRows = [
+          { label: 'Risk Level', getter: c => c.risk_level, colorLogic: val => ['CRITICAL','HIGH'].includes(val) ? 'color:var(--pnb-red);font-weight:bold' : 'color:var(--pnb-success)' },
+          { label: 'Crypto Mode', getter: c => c.crypto_mode, colorLogic: val => val==='PQC_READY' ? 'color:var(--pnb-success);font-weight:bold' : (val==='CLASSICAL' ? 'color:var(--pnb-red)' : 'color:var(--pnb-warning)') },
+          { label: 'Quantum Risk Horizon', getter: c => c.quantum_risk_horizon, colorLogic: val => val?.includes('URGENT') ? 'color:var(--pnb-red)' : '' },
+          { label: 'PQC Score', getter: c => c.pqc_score, colorLogic: val => { 
+                if (data.comparisons.length > 1) {
+                    if (val === maxPqc && maxPqc > minPqc) return 'color:var(--pnb-success);font-weight:bold';
+                    if (val === minPqc && maxPqc > minPqc) return 'color:var(--pnb-red);font-weight:bold';
+                }
+                return '';
+          } },
+          { label: 'Agility Score', getter: c => c.crypto_agility_score, colorLogic: () => '' },
+          { label: 'HNDL Risk', getter: c => c.hndl_risk ? 'YES' : 'NO', colorLogic: val => val==='YES' ? 'background:rgba(196,18,48,0.1);color:var(--pnb-red);font-weight:bold;padding:2px 6px;border-radius:4px' : '' }
+      ];
+      
+      tbody.innerHTML = configRows.map(rowConfig => {
+          return `
+            <tr>
+              <td style="font-weight:600; color:var(--pnb-text-muted);">${rowConfig.label}</td>
+              ${data.comparisons.map(c => {
+                  const val = rowConfig.getter(c) || 'N/A';
+                  const style = rowConfig.colorLogic(val);
+                  return `<td style="text-align:center;"><span style="${style}">${val}</span></td>`;
+              }).join('')}
+            </tr>
+          `;
+      }).join('');
+      
+  } catch(e) {
+      const btn = document.getElementById('btnCompareDomains');
+      if (btn) btn.textContent = "Compare Domains";
+      console.warn("Comparison load error", e);
+  }
+}

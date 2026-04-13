@@ -247,6 +247,14 @@
         Cyber Rating
         <span class="nav-active-dot"></span>
       </a>
+      <a href="#benchmarking" class="nav-item" data-section="benchmarking">
+        <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>
+        </svg>
+        Benchmarking
+        <span class="nav-active-dot"></span>
+      </a>
       <a href="#reporting" class="nav-item" data-section="reporting">
         <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -692,7 +700,7 @@
         <div id="engineResultsContainer" style="display:none; flex-direction:column; gap:24px;">
           
           <!-- HNDL Risk Badge -->
-          <div class="hndl-badge-container" id="engineHndlBadge" style="display:none;">
+          <div class="hndl-badge-container" id="engineHndlBadge" style="display:none;" title="This asset's encrypted traffic may be vulnerable to future quantum decryption.">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="margin-right:8px; color:var(--pnb-red);">
               <path d="M12 9v2m0 4h.01M22.201 19L13.882 3.633C13.25 2.457 10.75 2.457 10.118 3.633L1.799 19C1.144 20.219 2.124 22 3.681 22h16.638c1.557 0 2.537-1.781 1.882-3z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
@@ -717,6 +725,32 @@
               <div class="engine-summary-stat">
                 <span class="engine-stat-label">Overall Risk</span>
                 <span class="engine-stat-val" id="engineRiskLevel" style="font-family:var(--font-sans);">HIGH</span>
+              </div>
+              <div class="engine-summary-stat">
+                <span class="engine-stat-label">Crypto Mode</span>
+                <span class="engine-stat-val" id="engineCryptoMode" style="font-family:var(--font-sans); padding: 2px 6px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid transparent;">N/A</span>
+              </div>
+              <div class="engine-summary-stat">
+                <span class="engine-stat-label">Risk Horizon</span>
+                <span class="engine-stat-val" id="engineRiskHorizon" style="font-family:var(--font-sans);">N/A</span>
+              </div>
+            </div>
+            
+            <!-- Export Actions Panel -->
+            <div class="export-actions" id="engineExportActions" style="display:none;">
+              <div class="export-actions-label">
+                <span class="export-icon">📄</span>
+                <span>Generate Report</span>
+              </div>
+              <div class="export-buttons-row">
+                <button id="btnExportPdf" class="btn-export btn-export-pdf" title="Download Executive PDF Report">
+                  <span class="btn-export-icon">📋</span>
+                  <span class="btn-export-label">Export PDF</span>
+                </button>
+                <button id="btnExportExcel" class="btn-export btn-export-excel" title="Download Multi-Sheet Excel Workbook">
+                  <span class="btn-export-icon">📊</span>
+                  <span class="btn-export-label">Export Excel</span>
+                </button>
               </div>
             </div>
           </div>
@@ -1940,7 +1974,89 @@
       </div>
     </footer>
 
+    <!-- BENCHMARKING SEC -->
+    <section id="section-benchmarking" class="spa-section" style="display:none;">
+      <div class="page-header">
+        <h2 class="page-title">Strategic Benchmarking</h2>
+        <p class="page-subtitle">Compare asset postures side-by-side and visualize risk trajectory over time.</p>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 24px;">
+        
+        <!-- RISK TREND ANALYSIS -->
+        <section class="card trend-card">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+              Risk Trend Analysis
+            </h2>
+            <div style="display:flex; gap:12px; align-items:center;">
+              <select id="trendDomainSelect" class="report-select" style="min-width:200px;">
+                <option value="">Select Domain...</option>
+              </select>
+              <button class="action-btn outline sm" id="btnLoadTrend">Load Trend</button>
+            </div>
+          </div>
+          <div class="card-body">
+            
+            <div id="trendEmptyState" class="table-empty" style="padding:40px 0;">
+              <p class="empty-title">No Trend Data</p>
+              <p class="empty-desc">Select a domain with multiple scans to view its cryptographic performance over time.</p>
+            </div>
+            
+            <div id="trendChartContainer" style="display:none; height:300px; width:100%; position:relative;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
+                <div class="stat-content"><span class="stat-label">Avg PQC Score</span><span class="stat-value" id="trendAvgPqc" style="font-size:1.4rem;">--</span></div>
+                <div class="stat-content"><span class="stat-label">Avg Agility Score</span><span class="stat-value" id="trendAvgAgility" style="font-size:1.4rem;">--</span></div>
+                <div class="stat-content"><span class="stat-label">Latest Risk Level</span><span class="stat-value" id="trendLatestRisk" style="font-size:1.4rem;">UNKNOWN</span></div>
+              </div>
+              <canvas id="trendChartCanvas"></canvas>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- ASSET COMPARISON -->
+        <section class="card comparison-card">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>
+              Asset Comparison View
+            </h2>
+          </div>
+          <div class="card-body">
+            <div style="display:flex; gap:12px; margin-bottom: 20px; align-items:center;">
+              <input type="text" id="compareDomainsInput" class="domain-input" placeholder="e.g. portal.com, api.com" style="flex:1;">
+              <button class="scan-btn" id="btnCompareDomains" style="width:auto; padding:0 24px;">Compare Domains</button>
+            </div>
+
+            <div id="compareEmptyState" class="table-empty" style="padding:40px 0;">
+              <p class="empty-title">Comparison Ready</p>
+              <p class="empty-desc">Enter comma-separated domains above to compare their latest scan metrics.</p>
+            </div>
+
+            <div id="compareTableContainer" class="table-wrapper" style="display:none; overflow-x:auto;">
+              <table class="inventory-table">
+                <thead>
+                  <tr id="compareTableHeadRow">
+                    <!-- Dynamic Headers -->
+                  </tr>
+                </thead>
+                <tbody id="compareTableBody">
+                  <!-- Dynamic Rows -->
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+        </section>
+
+      </div>
+    </section>
+
   </main>
+  
+  <!-- Add Asset Modal handling... -->
 
   <script src="frontend/script.js?v=2.0.1"></script>
 </body>

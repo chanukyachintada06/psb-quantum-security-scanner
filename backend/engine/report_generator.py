@@ -287,6 +287,21 @@ def _build_executive_narrative(data: dict, styles) -> list:
             "Continued monitoring against evolving NIST standards and RBI/CERT-IN mandates is advised."
         )
 
+    # 5. Trend Section
+    trends = data.get("historical_trends", [])
+    if len(trends) > 1:
+        latest_score = trends[-1].get("pqc_score", 0)
+        oldest_score = trends[0].get("pqc_score", 0)
+        
+        if latest_score > oldest_score:
+            trend_narrative = "<font color='#22C55E'><b>Quantum posture has improved</b></font> over historical scans."
+        elif latest_score < oldest_score:
+            trend_narrative = "<font color='#C41230'><b>Quantum posture has degraded</b></font> compared to previous scans."
+        else:
+            trend_narrative = "Quantum posture has <b>remained stable</b> over historical scans."
+            
+        narrative += f"<br/><br/><b>Historical Trend Analysis:</b> {trend_narrative}"
+
     box_data = [[Paragraph(narrative, styles["Narrative"])]]
     t = Table(box_data, colWidths=["100%"])
     t.setStyle(TableStyle([
@@ -340,7 +355,7 @@ def _build_summary_section(data: dict, styles) -> list:
          Paragraph("Cryptographic Mode", styles["TableCell"]),
          Paragraph(crypto_mode, styles["TableCellMono"])],
         [Paragraph("Quantum Risk Horizon", styles["TableCell"]),
-         Paragraph(f"<b>{horizon} yr</b>" if horizon != "N/A" else "N/A", styles["TableCell"]),
+         Paragraph(f"<b>{horizon}</b>" if horizon != "N/A" else "N/A", styles["TableCell"]),
          Paragraph("HNDL Risk", styles["TableCell"]),
          Paragraph(f"<b>{hndl}</b>", ParagraphStyle("hndl", parent=styles["TableCell"],
                    textColor=BRAND_DANGER if profile.get("hndl_risk") else BRAND_SUCCESS,
@@ -797,7 +812,7 @@ def generate_excel_report(data: dict) -> bytes:
         ("PQC Compliance Score", f"{profile.get('pqc_score', 'N/A')} / 100"),
         ("Crypto Agility Score", f"{profile.get('crypto_agility_score', 'N/A')} / 100"),
         ("Cryptographic Mode", profile.get("crypto_mode", "N/A")),
-        ("Quantum Risk Horizon", f"{profile.get('quantum_risk_horizon', 'N/A')} years"),
+        ("Quantum Risk Horizon", f"{profile.get('quantum_risk_horizon', 'N/A')}"),
         ("HNDL Risk", "YES" if profile.get("hndl_risk") else "NO"),
         ("Engine Confidence", f"{profile.get('confidence_score', 'N/A')}%"),
         ("Scan Duration (ms)", str(data.get("scan_duration_ms", "N/A"))),

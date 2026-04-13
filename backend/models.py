@@ -13,11 +13,12 @@ from typing import List, Dict, Any, Optional
 class RiskProfile(BaseModel):
     pqc_score: int
     crypto_mode: str
-    quantum_risk_horizon: Optional[int]
+    quantum_risk_horizon: Optional[str]
     crypto_agility_score: int
     risk_level: str
     hndl_risk: bool
     confidence_score: int
+    agility_factors: Optional[List[str]] = None
 
 class IPDetail(BaseModel):
     ip_address: str

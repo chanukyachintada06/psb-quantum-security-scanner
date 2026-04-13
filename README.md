@@ -34,7 +34,7 @@ Try the live deployment here:
 - Assign a PQC risk score (0–100) and readiness percentage
 - Generate structured CBOM aligned with CERT-IN Annexure-A
 - Recommend Post-Quantum alternatives (Kyber-768, Dilithium, SPHINCS+, Hybrid TLS)
-- Store scan history, audit logs, and classification labels in MySQL
+- Store scan history, audit logs, and classification labels in Supabase (PostgreSQL)
 - Display results on a real-time interactive dashboard
  
 ---
@@ -47,7 +47,7 @@ Try the live deployment here:
 4. Cryptographic parameters extracted (cipher suites, key types, certificate metadata)
 5. Quantum Validation Engine classifies vulnerability using NIST FIPS 203/204/205
 6. Risk score, PQC readiness, and recommendations generated
-7. Results stored in MySQL (scan_results, cbom_records, audit_logs, classification_labels)
+7. Results stored in Supabase (scan_results, cbom_records, audit_logs, classification_labels)
 8. Dashboard displays real-time output across 7 modules
  
 ---
@@ -60,7 +60,7 @@ Try the live deployment here:
 | **Backend** | Python 3.12, FastAPI, Uvicorn |
 | **TLS Scanner** | sslyze 6.x, cryptography library |
 | **PQC Engine** | Custom classifier — NIST FIPS 203/204/205 |
-| **Database** | MySQL 8.0 (mysql-connector-python) |
+| **Database** | Supabase (PostgreSQL) |
 | **Version Control** | Git, GitHub |
 | **IDE** | VS Code, Antigravity IDE |
  
@@ -80,7 +80,7 @@ quantum-proof-scanner/
 │   ├── main.py             ← FastAPI app + all API endpoints
 │   ├── scanner.py          ← TLS scanning engine (sslyze)
 │   ├── quantum_validator.py← PQC algorithm classifier
-│   ├── database.py         ← MySQL connection + all queries
+│   ├── database.py         ← Supabase connection + all queries
 │   ├── models.py           ← Pydantic response models
 │   ├── requirements.txt    ← Python dependencies
 │   ├── run.bat             ← Windows one-click startup
@@ -113,15 +113,15 @@ quantum-proof-scanner/
 | GET | `/health` | Health check + DB status |
 | POST | `/api/scan` | Scan a domain (JSON body) |
 | GET | `/api/scan/{domain}` | Scan a domain (URL param) |
-| GET | `/api/history` | Recent scan history from MySQL |
-| GET | `/api/cbom` | CBOM records from MySQL |
-| GET | `/api/audit` | Audit logs from MySQL |
+| GET | `/api/history` | Recent scan history from Supabase |
+| GET | `/api/cbom` | CBOM records from Supabase |
+| GET | `/api/audit` | Audit logs from Supabase |
 | GET | `/api/stats` | Aggregated dashboard statistics |
 | GET | `/docs` | Swagger UI documentation |
  
 ---
  
-## 🗄️ Database Schema (MySQL)
+## 🗄️ Database Schema (Supabase/PostgreSQL)
  
 ```
 quantum_scanner_db
@@ -139,7 +139,7 @@ Tables are created automatically on first backend startup — no manual SQL need
  
 ### Prerequisites
 - Python 3.10+
-- MySQL 8.0
+- Supabase Account (Free Tier OK)
 - Google Chrome
  
 ### Step 1 — Clone the Repository
@@ -148,27 +148,25 @@ git clone https://github.com/YOUR_USERNAME/quantum-proof-scanner.git
 cd quantum-proof-scanner
 ```
  
-### Step 2 — Set Up MySQL Database
-```sql
--- Run in MySQL shell
-CREATE DATABASE quantum_scanner_db;
-```
+### Step 2 — Configure Supabase Backend
+
+The platform uses Supabase for PostgreSQL persistence and JWT authentication.
+
+1. **Environment Configuration**: Update your `.env` file with your project credentials:
+   ```env
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+   SUPABASE_JWT_SECRET=your_jwt_secret
+   ```
  
-### Step 3 — Configure Environment
+### Step 3 — Initialize Environment
 ```bash
 cd backend
 cp .env.example .env
-# Edit .env and set your MySQL password
+# Edit .env and ensure Supabase keys are correct
 ```
  
-`.env` file contents:
-```
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=quantum_scanner_db
-DB_USER=root
-DB_PASSWORD=your_mysql_password
-```
+
  
 ### Step 4 — Install Python Dependencies
 ```bash
@@ -186,8 +184,8 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
  
 You should see:
 ```
-✅ MySQL connected successfully!
-✅ Database tables initialized successfully.
+✅ Supabase connected successfully!
+✅ Database schema verified.
 INFO: Application startup complete.
 ```
  
@@ -223,7 +221,7 @@ Try scanning:
 - ✅ Real TLS scanning via sslyze (not mock data)
 - ✅ PQC risk scoring aligned to NIST FIPS 203/204/205
 - ✅ CBOM generation per CERT-IN Annexure-A
-- ✅ MySQL persistence — scan history survives restarts
+- ✅ Supabase persistence — scan history survives restarts
 - ✅ Full audit trail — every scan logged with timestamp and IP
 - ✅ User authentication — role-based login system
 - ✅ Demo mode fallback — works offline with mock data
@@ -239,7 +237,7 @@ Try scanning:
 |---|---|
 | [Chanukya Venkata Sai](https://github.com/chanukyachintada06) | Team Lead — Risk Engine, Frontend, Integration | 
 | [G.L. Santhosh Reddy](https://github.com/santhoshreddy28) | Backend Developer — Scanner Engine & API |
-| [ANKUSH TANWAR](https://github.com/ANKUSHTANWAR55) | Database Engineer — MySQL Design & Data Integrity |
+| [ANKUSH TANWAR](https://github.com/ANKUSHTANWAR55) | Database Engineer — Supabase/PostgreSQL Design & Data Integrity |
 | [Anil Kumar Reddy](https://github.com/Anil6373)  | QA Engineer — Testing & Validation |
 
 ---
