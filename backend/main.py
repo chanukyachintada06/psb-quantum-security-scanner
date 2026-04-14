@@ -18,23 +18,31 @@ import database as db
 
 import json
 
-# ── JWT AUTHENTICATION ─────────────────────────────────────────
+# ── JWT AUTHENTICATION (HS256 / Supabase) ─────────────────────
+# Supabase issues HS256-signed JWTs. We ONLY support HS256 here.
+# The supabase_jwk.json (ES256) is intentionally NOT used for
+# token verification — it causes 401 on every authenticated call.
+JWT_ALGORITHM = "HS256"  # Supabase always issues HS256 tokens
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
-JWT_VERIFICATION_KEY = None
-JWT_ALGORITHM = "HS256"
+JWT_VERIFICATION_KEY = SUPABASE_JWT_SECRET  # HMAC secret, not a JWK
 
-jwk_path = os.path.join(os.path.dirname(__file__), "supabase_jwk.json")
-if os.path.exists(jwk_path):
-    try:
-        with open(jwk_path, "r") as f:
-            jwk_data = json.load(f)
-            JWT_VERIFICATION_KEY = jwt.PyJWK(jwk_data).key
-            JWT_ALGORITHM = jwk_data.get("alg", "ES256")
-    except Exception as e:
-        print(f"  ⚠️  Failed to load supabase_jwk.json: {e}")
-
-if not JWT_VERIFICATION_KEY:
-    JWT_VERIFICATION_KEY = SUPABASE_JWT_SECRET
+def _validate_jwt_config():
+    """
+    Startup guard — fails loudly if SUPABASE_JWT_SECRET is missing or
+    looks like a placeholder. Called once during lifespan startup.
+    """
+    secret = SUPABASE_JWT_SECRET.strip()
+    if not secret or secret in ("your-jwt-secret-here", "changeme"):
+        raise RuntimeError(
+            "FATAL: SUPABASE_JWT_SECRET is missing or set to a placeholder value. "
+            "Set the correct secret from Supabase → Project Settings → API → JWT Secret."
+        )
+    if len(secret) < 32:
+        print(
+            "  ⚠️  WARNING: SUPABASE_JWT_SECRET looks very short. "
+            "Ensure it is the full JWT secret from Supabase project settings."
+        )
+    print(f"  [OK] JWT config: algorithm=HS256, secret length={len(secret)} chars")
 
 def extract_user_id(request: Request) -> str:
     """
@@ -65,11 +73,12 @@ def extract_user_id(request: Request) -> str:
         )
 
     try:
-        # Decode and VERIFY signature, expiry, and other claims strictly with the parsed key
+        # Decode and VERIFY signature (HS256), expiry (exp), and subject (sub).
+        # algorithms list is LOCKED to ["HS256"] — no ES256/RS256 allowed.
         payload = jwt.decode(
-            token, 
-            JWT_VERIFICATION_KEY, 
-            algorithms=[JWT_ALGORITHM],
+            token,
+            SUPABASE_JWT_SECRET,   # Always use the raw HMAC secret
+            algorithms=["HS256"],  # Supabase issues HS256 — do not change
             options={"verify_exp": True}
         )
         
@@ -116,12 +125,27 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# ── CORS ───────────────────────────────────────────────────────
+# Explicit origins so browsers send cookies/Authorization with credentials.
+# Wildcard "*" cannot be combined with allow_credentials=True (CORS spec).
+_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:5500",
+    "http://127.0.0.1:3000",
+    # Production frontend URL — add here when deploying:
+    # "https://your-app.vercel.app",
+]
+# Allow all file:// and local origins during development by also checking
+# the wildcard fallback when credentials are NOT needed.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_CORS_ORIGINS,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 # ── STARTUP ────────────────────────────────────────────────────
@@ -135,6 +159,13 @@ async def startup_event():
     print("  Docs: http://localhost:8000/docs")
     print("  API:  http://localhost:8000/api/scan")
     print("=" * 60)
+
+    # ── VALIDATE JWT CONFIG (fail loudly on misconfiguration) ──
+    try:
+        _validate_jwt_config()
+    except RuntimeError as cfg_err:
+        print(f"  ❌ STARTUP ABORTED: {cfg_err}")
+        raise  # Re-raise to stop the server from starting
 
     print("\n  Connecting to Supabase...")
     if db.test_connection():

@@ -775,17 +775,29 @@ function clearHistory() {
    ============================================================ */
 
 async function fetchAssetsFromSupabase() {
+  // Guard: never fire an unauthenticated request — backend will reject it with 401
+  if (!isSessionReady()) {
+    console.warn('[QSCS] fetchAssetsFromSupabase: session not ready, skipping.');
+    return;
+  }
   try {
-    const response = await fetch(`${API_BASE_URL}/api/assets`, {
-      headers: typeof authHeaders === 'function' ? authHeaders() : {}
-    });
+    const hdrs = authHeaders();
+    const response = await fetch(`${API_BASE_URL}/api/assets`, { headers: hdrs });
     
     if (!response.ok) {
         console.warn('Assets fetch failed:', response.status);
         const tbody = document.getElementById('homeAssetTableBody');
         if (tbody) {
+            let errMsg = 'Server Error';
+            if (response.status === 401) {
+              errMsg = 'Session expired — please log out and sign in again';
+            } else if (response.status === 403) {
+              errMsg = 'Access denied (403)';
+            } else {
+              errMsg = `API Error ${response.status}`;
+            }
             tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 40px; color: var(--pnb-danger);">
-                FAILED TO LOAD ASSETS: ${response.status === 401 ? 'Authentication Error' : 'Server Error'}
+                Failed to load assets: ${errMsg}
             </td></tr>`;
         }
         return;
@@ -797,9 +809,9 @@ async function fetchAssetsFromSupabase() {
     // Also update asset discovery if on that page
     if (Router.currentSection === 'asset-discovery') renderAssetDiscovery();
   } catch (err) {
-    console.warn('Failed to fetch assets:', err);
+    console.warn('Failed to fetch assets (network error):', err);
     const tbody = document.getElementById('homeAssetTableBody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 40px; color: var(--pnb-danger);">Network error while loading assets.</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 40px; color: var(--pnb-danger);">Network error — backend may be offline. Check console.</td></tr>`;
   }
 }
 
@@ -934,16 +946,23 @@ window.editAsset = function(id) {
 };
 
 async function fetchNameservers(domain = null) {
+  // Guard: never fire an unauthenticated request
+  if (!isSessionReady()) {
+    console.warn('[QSCS] fetchNameservers: session not ready, skipping.');
+    return;
+  }
   try {
     const url = domain ? `${API_BASE_URL}/api/nameservers?domain=${domain}` : `${API_BASE_URL}/api/nameservers`;
-    const response = await fetch(url, {
-      headers: typeof authHeaders === 'function' ? authHeaders() : {}
-    });
+    const hdrs = authHeaders();
+    const response = await fetch(url, { headers: hdrs });
     if (!response.ok) {
         console.warn('Nameserver fetch error:', response.status);
         const tbody = document.getElementById('nameserverTableBody');
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 20px; color: var(--pnb-danger);">Failed to load nameservers (${response.status})</td></tr>`;
+            const errMsg = response.status === 401
+              ? 'Session expired — please log out and sign in again'
+              : `API Error ${response.status}`;
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 20px; color: var(--pnb-danger);">Failed to load nameservers: ${errMsg}</td></tr>`;
         }
         return;
     }
@@ -951,10 +970,10 @@ async function fetchNameservers(domain = null) {
     AppState.nameservers = data.nameservers || [];
     renderNameserverTable();
   } catch (err) {
-    console.warn('Nameserver fetch error:', err);
+    console.warn('Nameserver fetch error (network):', err);
     const tbody = document.getElementById('nameserverTableBody');
     if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 20px; color: var(--pnb-danger);">Network error while loading nameservers</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 20px; color: var(--pnb-danger);">Network error — backend may be offline. Check console.</td></tr>`;
     }
   }
 }
@@ -981,22 +1000,23 @@ function renderNameserverTable() {
 }
 
 async function fetchAuditLogs() {
+  if (!isSessionReady()) return; // Session race guard
   const feed = document.getElementById('homeActivityFeed');
   if (!feed) return;
   
   try {
-    const response = await fetch(`${API_BASE_URL}/api/audit`, {
-      headers: typeof authHeaders === "function" ? authHeaders() : {}
-    });
+    const hdrs = authHeaders();
+    const response = await fetch(`${API_BASE_URL}/api/audit`, { headers: hdrs });
     if (!response.ok) {
         console.warn("Audit logs fetch error:", response.status);
-        renderActivityFeed([{ action: "FETCH_ERROR", created_at: new Date(), domain: `Error ${response.status}` }]);
+        const errMsg = response.status === 401 ? 'Auth error (401)' : `Error ${response.status}`;
+        renderActivityFeed([{ action: "FETCH_ERROR", created_at: new Date(), domain: errMsg }]);
         return;
     }
     const data = await response.json();
     renderActivityFeed(data.audit_logs || []);
   } catch (err) {
-    console.warn("Failed to fetch audit logs:", err);
+    console.warn("Failed to fetch audit logs (network error):", err);
   }
 }
 
@@ -1050,18 +1070,19 @@ function formatRelativeTime(date) {
    ============================================================ */
 
 async function fetchDashboardStats() {
+  if (!isSessionReady()) return; // Session race guard
   try {
-    const response = await fetch(`${API_BASE_URL}/api/stats`, {
-      headers: typeof authHeaders === 'function' ? authHeaders() : {}
-    });
+    const hdrs = authHeaders();
+    const response = await fetch(`${API_BASE_URL}/api/stats`, { headers: hdrs });
     if (!response.ok) {
-      console.warn('[Dashboard] Stats fetch error:', response.status);
+      const errMsg = response.status === 401 ? '401 Unauthorized' : `${response.status}`;
+      console.warn('[Dashboard] Stats fetch error:', errMsg);
       return;
     }
     const data = await response.json();
     updateDashboardStatsUI(data);
   } catch (err) {
-    console.warn('[Dashboard] Stats fetch error:', err);
+    console.warn('[Dashboard] Stats fetch error (network):', err);
   }
 }
 
@@ -2332,12 +2353,19 @@ function getJWT() {
   return _session?.access_token ?? null;
 }
 
-/** Build Authorization headers; falls back to Content-Type only if unauthenticated. */
+/** Build Authorization headers; returns null if no authenticated session exists. */
 function authHeaders() {
   const token = getJWT();
-  return token
-    ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
-    : { 'Content-Type': 'application/json' };
+  if (!token) return null;  // Caller must check for null and skip the request
+  return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+}
+
+/**
+ * Returns true when the session token is ready for use.
+ * Use this before initiating any authenticated API call.
+ */
+function isSessionReady() {
+  return !!getJWT();
 }
 
 /* â”€â”€ DOM helper â”€â”€ */
@@ -2432,6 +2460,12 @@ async function fetchHistoryFromSupabase() {
 }
 
 function refreshDashboardData() {
+  // Guard: do not fire any authenticated API call before session is established.
+  // This prevents the startup race where fetch fires with no Authorization header.
+  if (!isSessionReady()) {
+    console.info('[QSCS] refreshDashboardData: session not ready, deferring.');
+    return;
+  }
   if (typeof fetchHistoryFromSupabase === 'function') fetchHistoryFromSupabase();
   if (typeof fetchAssetsFromSupabase === 'function') fetchAssetsFromSupabase();
   if (typeof fetchNameservers === 'function') fetchNameservers();
