@@ -4,10 +4,10 @@ import urllib.request
 import urllib.error
 import json
 
-TEST_SECRET = "test_secret_12345"
-BASE_URL = "http://127.0.0.1:8001"
+TEST_SECRET = "6bm+WV/yoTfIhgd+6J0l57VgzhBNRPMep6N/LKZkkDO9De1bpHgFJbM5R02G13/SZYMTnffoRNwzVAPysnsXiA=="
+BASE_URL = "http://127.0.0.1:8000"
 
-def create_token(sub="1234-5678", email="test@example.com", expires_in=3600, secret=TEST_SECRET):
+def create_token(sub="1234-5678", email="test@example.com", expires_in=3600, secret=TEST_SECRET, aud=None):
     payload = {
         "sub": sub,
         "email": email,
@@ -15,6 +15,8 @@ def create_token(sub="1234-5678", email="test@example.com", expires_in=3600, sec
         "iat": int(time.time()),
         "iss": "supabase"
     }
+    if aud:
+        payload["aud"] = aud
     return jwt.encode(payload, secret, algorithm="HS256")
 
 def test_endpoint(path, token=None, header_name="Authorization"):
@@ -64,14 +66,41 @@ def run_tests():
     print(f"[TEST 4] Expired Token: Expected 401, Got {code}")
     assert code == 401
 
-    # 5. Valid Token
+    # 5. Valid HS256 Token (WITHOUT audience)
+    # This should now succeed with the conditional fix
     valid_token = create_token()
     code, body = test_endpoint("/api/history", token=valid_token)
-    print(f"[TEST 5] Valid Token: Expected 200, Got {code}")
-    # Note: Might get 500 if DB is not reachable, but should NOT be 401
+    print(f"[TEST 5] Valid HS256 (No Audience): Expected 200/500, Got {code}")
     assert code in [200, 500], f"Failed: Got {code} - {body}"
-    if code == 500:
-        print("  (Note: Got 500, likely due to DB connection which is expected in this environment)")
+
+    # 6. /api/stats
+    code, body = test_endpoint("/api/stats", token=valid_token)
+    print(f"[TEST 6] /api/stats: Expected 200/500, Got {code}")
+    assert code in [200, 500]
+
+    # 7. /api/assets
+    code, body = test_endpoint("/api/assets", token=valid_token)
+    print(f"[TEST 7] /api/assets: Expected 200/500, Got {code}")
+    assert code in [200, 500]
+
+    # 8. /api/nameservers
+    code, body = test_endpoint("/api/nameservers", token=valid_token)
+    print(f"[TEST 8] /api/nameservers: Expected 200/500, Got {code}")
+    assert code in [200, 500]
+
+    # 9. Optional: /api/audit-login (POST)
+    # Verify the login audit flow mentioned by user
+    print("[TEST 9] Verifying audit-login flow...")
+    url = f"{BASE_URL}/api/audit-login"
+    data = json.dumps({"event": "USER_LOGIN_VERIFICATION"}).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers={"Authorization": f"Bearer {valid_token}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req) as response:
+            code = response.status
+    except urllib.error.HTTPError as e:
+        code = e.code
+    print(f"  [RESULT] audit-login: Expected 200/500, Got {code}")
+    assert code in [200, 500]
 
     print("--- ALL MODES VERIFIED ---")
 

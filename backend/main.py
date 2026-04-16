@@ -18,13 +18,18 @@ import database as db
 
 import json
 
-# ── JWT AUTHENTICATION (HS256 / Supabase) ─────────────────────
-# Supabase issues HS256-signed JWTs. We ONLY support HS256 here.
-# The supabase_jwk.json (ES256) is intentionally NOT used for
-# token verification — it causes 401 on every authenticated call.
-JWT_ALGORITHM = "HS256"  # Supabase always issues HS256 tokens
+# == JWT AUTHENTICATION (HS256 / ES256 / Supabase) ==
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
-JWT_VERIFICATION_KEY = SUPABASE_JWT_SECRET  # HMAC secret, not a JWK
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+
+# JWKS client to fetch ES256 public keys securely from Supabase
+JWKS_URL = f"{SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else ""
+jwk_client = None
+if JWKS_URL:
+    try:
+        jwk_client = jwt.PyJWKClient(JWKS_URL, cache_keys=True)
+    except Exception as e:
+        print(f"  [WARN] Failed to initialize JWK client: {e}")
 
 def _validate_jwt_config():
     """
@@ -66,20 +71,49 @@ def extract_user_id(request: Request) -> str:
     if not SUPABASE_JWT_SECRET:
         # Fallback to a warning in logs if secret is missing, 
         # but in production this should be a configuration error.
-        print("  ⚠️  CRITICAL: SUPABASE_JWT_SECRET is not set. Token verification will fail.")
+        print("  [WARN] CRITICAL: SUPABASE_JWT_SECRET is not set. Token verification will fail.")
         raise HTTPException(
             status_code=500, 
             detail="Internal Server Error: Auth configuration missing"
         )
 
     try:
-        # Decode and VERIFY signature (HS256), expiry (exp), and subject (sub).
-        # algorithms list is LOCKED to ["HS256"] — no ES256/RS256 allowed.
+        # Inspect unverified header to determine algorithm
+        try:
+            unverified_header = jwt.get_unverified_header(token)
+        except Exception:
+            raise HTTPException(status_code=401, detail="Unauthorized: Invalid token header")
+        
+        alg = unverified_header.get("alg")
+        
+        if alg == "ES256":
+            if not jwk_client:
+                raise HTTPException(status_code=500, detail="Internal Server Error: JWK client not initialized")
+            signing_key = jwk_client.get_signing_key_from_jwt(token)
+            key = signing_key.key
+            algorithms = ["ES256"]
+        elif alg == "HS256":
+            key = SUPABASE_JWT_SECRET
+            algorithms = ["HS256"]
+        else:
+            raise HTTPException(status_code=401, detail=f"Unauthorized: Algorithm '{alg}' not allowed. Expected 'ES256' or 'HS256'.")
+
+        # Select audience requirement based on algorithm
+        # ES256 (Supabase) MUST have "authenticated" audience
+        # HS256 (Local Dev) does not require it unless explicitly set
+        target_audience = "authenticated" if alg == "ES256" else None
+        verify_aud = (target_audience is not None)
+
+        # Decode and VERIFY signature, expiry (exp), and subject (sub).
         payload = jwt.decode(
             token,
-            SUPABASE_JWT_SECRET,   # Always use the raw HMAC secret
-            algorithms=["HS256"],  # Supabase issues HS256 — do not change
-            options={"verify_exp": True}
+            key,
+            algorithms=algorithms,
+            audience=target_audience,
+            options={
+                "verify_exp": True,
+                "verify_aud": verify_aud
+            }
         )
         
         uid = payload.get("sub")
@@ -97,8 +131,8 @@ def extract_user_id(request: Request) -> str:
         try:
             unverified_header = jwt.get_unverified_header(token)
             alg = unverified_header.get("alg")
-            msg = f"Unauthorized: Algorithm '{alg}' not allowed. Expected '{JWT_ALGORITHM}'."
-            print(f"  ❌ JWT Auth Mismatch: {msg}")
+            msg = f"Unauthorized: Algorithm '{alg}' not allowed. Expected 'ES256' or 'HS256'."
+            print(f"  [ERROR] JWT Auth Mismatch: {msg}")
             raise HTTPException(status_code=401, detail=msg)
         except HTTPException:
             raise
@@ -106,14 +140,14 @@ def extract_user_id(request: Request) -> str:
             raise HTTPException(status_code=401, detail="Unauthorized: Invalid algorithm header")
     except jwt.InvalidTokenError as e:
         # Log common issues for debugging
-        print(f"  ❌ JWT invalid: {str(e)}")
+        print(f"  [ERROR] JWT invalid: {str(e)}")
         raise HTTPException(status_code=401, detail=f"Unauthorized: Invalid token ({str(e)})")
     except Exception as e:
         if isinstance(e, HTTPException): raise e
-        print(f"  ❌ JWT exception: {str(e)}")
+        print(f"  [ERROR] JWT exception: {str(e)}")
         raise HTTPException(status_code=401, detail="Unauthorized: Authentication failed")
 
-# ── APP SETUP ──────────────────────────────────────────────────
+# == APP SETUP ==
 app = FastAPI(
     title="Quantum-Proof Systems Scanner API",
     description=(
@@ -125,7 +159,7 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# ── CORS ───────────────────────────────────────────────────────
+# == CORS ==
 # Explicit origins so browsers send cookies/Authorization with credentials.
 # Wildcard "*" cannot be combined with allow_credentials=True (CORS spec).
 _CORS_ORIGINS = [
@@ -148,7 +182,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
-# ── STARTUP ────────────────────────────────────────────────────
+# == STARTUP ==
 @app.on_event("startup")
 async def startup_event():
     print("\n" + "=" * 60)
@@ -164,7 +198,7 @@ async def startup_event():
     try:
         _validate_jwt_config()
     except RuntimeError as cfg_err:
-        print(f"  ❌ STARTUP ABORTED: {cfg_err}")
+        print(f"  [ERROR] STARTUP ABORTED: {cfg_err}")
         raise  # Re-raise to stop the server from starting
 
     print("\n  Connecting to Supabase...")
@@ -179,7 +213,7 @@ async def startup_event():
     print()
 
 
-# ── ROOT ───────────────────────────────────────────────────────
+# == ROOT ==
 @app.get("/")
 async def root():
     return {
@@ -195,7 +229,7 @@ async def root():
     }
 
 
-# ── HEALTH ─────────────────────────────────────────────────────
+# == HEALTH ==
 @app.get("/health")
 async def health():
     db_status = db.test_connection()
@@ -206,7 +240,7 @@ async def health():
     }
 
 
-# ── SCAN (POST) ────────────────────────────────────────────────
+# == SCAN (POST) ==
 @app.post("/api/scan", summary="Scan a domain for TLS/PQC vulnerabilities")
 async def scan_post(request: ScanRequest, req: Request):
     if not request.domain or len(request.domain.strip()) < 3:
@@ -238,7 +272,7 @@ async def scan_post(request: ScanRequest, req: Request):
         email = "unknown"
         if token:
             try:
-                payload = jwt.decode(token, algorithms=[JWT_ALGORITHM], options={"verify_signature": False})
+                payload = jwt.decode(token, algorithms=["HS256", "ES256"], options={"verify_signature": False})
                 email = payload.get("email", "unknown")
             except: pass
 
@@ -282,7 +316,7 @@ async def scan_post(request: ScanRequest, req: Request):
         raise HTTPException(status_code=422, detail=str(e))
 
 
-# ── SCAN (GET) ─────────────────────────────────────────────────
+# == SCAN (GET) ==
 @app.get("/api/scan/{domain:path}", summary="Scan a domain (GET method)")
 async def scan_get(domain: str, req: Request):
     if not domain or len(domain.strip()) < 3:
@@ -291,7 +325,7 @@ async def scan_get(domain: str, req: Request):
     return await scan_post(fake_req, req)
 
 
-# ── DB ENDPOINTS ───────────────────────────────────────────────
+# == DB ENDPOINTS ==
 @app.get("/api/assets", summary="Get asset inventory (user-scoped)")
 async def get_assets(req: Request):
     """Returns all assets for the authenticated user and their count."""
@@ -412,7 +446,7 @@ async def get_asset_trends(domain: str, req: Request):
     }
 
 
-# ── ASSETS ─────────────────────────────────────────────────────
+# == ASSETS ==
 
 @app.post("/api/assets", summary="Add new asset")
 async def add_asset_item(request: Request):
@@ -426,7 +460,7 @@ async def add_asset_item(request: Request):
     email = "unknown"
     if token:
         try:
-            payload = jwt.decode(token, algorithms=[JWT_ALGORITHM], options={"verify_signature": False})
+            payload = jwt.decode(token, algorithms=["HS256", "ES256"], options={"verify_signature": False})
             email = payload.get("email", "unknown")
         except: pass
     
@@ -457,7 +491,7 @@ async def update_asset_endpoint(asset_id: str, request: Request):
     email = "unknown"
     if token:
         try:
-            payload = jwt.decode(token, algorithms=[JWT_ALGORITHM], options={"verify_signature": False})
+            payload = jwt.decode(token, algorithms=["HS256", "ES256"], options={"verify_signature": False})
             email = payload.get("email", "unknown")
         except: pass
     
@@ -488,11 +522,11 @@ def _safe_db(func, *args, **kwargs):
     try:
         return func(*args, **kwargs)
     except Exception as e:
-        print(f"  ⚠️  DB warning: {e}")
+        print(f"  [WARN] DB warning: {e}")
         return None
 
 
-# ── REPORT GENERATION ─────────────────────────────────────────
+# == REPORT GENERATION ==
 import re as _re
 from fastapi.responses import StreamingResponse
 from engine.report_generator import generate_pdf_report, generate_excel_report
@@ -610,13 +644,13 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# ── ENTRY POINT ────────────────────────────────────────────────
+# == ENTRY POINT ==
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
 
 
-# ── LOGIN AUDIT ENDPOINT ───────────────────────────────────────
+# == LOGIN AUDIT ENDPOINT ==
 class LoginAuditRequest(BaseModel):
     event: str = "USER_LOGIN"
 
