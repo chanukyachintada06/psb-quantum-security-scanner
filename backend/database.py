@@ -16,6 +16,7 @@ RBAC MODEL
 """
 
 import os
+import uuid
 import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -56,6 +57,16 @@ def get_client() -> Client:
             )
         _supabase = create_client(url, key)
     return _supabase
+
+def validate_uuid(id_str: str | None) -> str | None:
+    """Check if string is a valid UUID, return None if not to prevent DB errors."""
+    if not id_str:
+        return None
+    try:
+        uuid.UUID(id_str)
+        return id_str
+    except (ValueError, TypeError):
+        return None
 
 
 # ── CONNECTION TEST ─────────────────────────────────────────────
@@ -145,16 +156,22 @@ def save_scan_result(user_id: str, scan_data: dict, created_by: str = None) -> s
     Insert a scan result into the normalized tables.
     """
     profile = scan_data.get("risk_profile", {})
+    details = scan_data.get("ip_details", [])
     
-    # 1. Insert Summary
+    # Extract primary node details (usually the first successful IP)
+    primary_node = next((n for n in details if n.get("is_successful")), details[0] if details else {})
+    tls_info = primary_node.get("tls", {})
+    cert_info = primary_node.get("certificate", {})
+    
+    # 1. Insert Summary (Aligned with discovered live schema)
     summary_row = {
-        "user_id":              user_id,
+        "user_id":              validate_uuid(user_id) or SYSTEM_USER_ID,
         "domain":               scan_data.get("domain"),
-        "scan_version":         scan_data.get("scan_version"),
-        "pqc_score":            profile.get("pqc_score"),
-        "crypto_mode":          profile.get("crypto_mode"),
+        "scan_version":         scan_data.get("scan_version", "v1.2"),
+        "pqc_score":            profile.get("pqc_score", 0),
+        "crypto_mode":          profile.get("crypto_mode", "UNKNOWN"),
         "quantum_risk_horizon": profile.get("quantum_risk_horizon"),
-        "crypto_agility_score": profile.get("crypto_agility_score"),
+        "crypto_agility_score": profile.get("crypto_agility_score", 0),
         "risk_level":           profile.get("risk_level", "HIGH"),
         "hndl_risk":            profile.get("hndl_risk", False),
         "confidence_score":     profile.get("confidence_score", 0),
@@ -167,8 +184,7 @@ def save_scan_result(user_id: str, scan_data: dict, created_by: str = None) -> s
             return None
         scan_id = res.data[0]["id"]
         
-        # 2. Insert Per-IP Details
-        details = scan_data.get("ip_details", [])
+        # 2. Insert Per-IP Detail Rows ... (rest of logic remains same)
         detail_rows = []
         for d in details:
              tls = d.get("tls") or {}
@@ -243,7 +259,7 @@ def save_audit_log(
 ) -> None:
     """Insert an audit log entry."""
     row = {
-        "user_id":    user_id,
+        "user_id":    validate_uuid(user_id),
         "action":     action,
         "domain":     domain,
         "ip_address": ip_address,
@@ -270,7 +286,7 @@ def get_recent_scans(user_id: str, limit: int = 20) -> list:
         query = (
             get_client()
             .table("scan_results")
-            .select("id, domain, scan_version, pqc_score, risk_level, crypto_mode, crypto_agility_score, scan_duration_ms, created_at, user_id")
+            .select("id, domain, scan_version, pqc_score, crypto_mode, quantum_risk_horizon, crypto_agility_score, risk_level, hndl_risk, confidence_score, scan_duration_ms, created_at, user_id")
         )
         if not superuser:
             query = query.eq("user_id", user_id)
@@ -317,7 +333,12 @@ def get_scans_by_ids(user_id: str, scan_ids: list) -> list:
         _log_superuser_access(user_id, "COMPARE_SCANS_IDS")
     
     try:
-        query = get_client().table("scan_results").select("id, domain, scan_version, pqc_score, risk_level, crypto_mode, crypto_agility_score, quantum_risk_horizon, hndl_risk, scan_duration_ms, created_at, user_id").in_("id", scan_ids)
+        query = (
+            get_client()
+            .table("scan_results")
+            .select("id, domain, scan_version, pqc_score, crypto_mode, quantum_risk_horizon, crypto_agility_score, risk_level, hndl_risk, confidence_score, scan_duration_ms, created_at, user_id")
+            .in_("id", scan_ids)
+        )
         if not superuser:
             query = query.eq("user_id", user_id)
         res = query.execute()
@@ -334,7 +355,12 @@ def get_latest_scans_by_domains(user_id: str, domains: list) -> list:
     
     scans = []
     try:
-        query = get_client().table("scan_results").select("id, domain, scan_version, pqc_score, risk_level, crypto_mode, crypto_agility_score, quantum_risk_horizon, hndl_risk, scan_duration_ms, created_at, user_id").in_("domain", domains)
+        query = (
+            get_client()
+            .table("scan_results")
+            .select("id, domain, scan_version, pqc_score, crypto_mode, quantum_risk_horizon, crypto_agility_score, risk_level, hndl_risk, confidence_score, scan_duration_ms, created_at, user_id")
+            .in_("domain", domains)
+        )
         if not superuser:
             query = query.eq("user_id", user_id)
         
@@ -674,12 +700,12 @@ def get_scan_for_report(scan_id: str, user_id: str) -> dict | None:
             "generated_by":     summary.get("created_by", "Quantum Security Engine"),
             "risk_profile": {
                 "risk_level":           summary.get("risk_level"),
-                "pqc_score":            summary.get("pqc_score"),
-                "crypto_agility_score": summary.get("crypto_agility_score"),
-                "quantum_risk_horizon": summary.get("quantum_risk_horizon"),
+                "pqc_score":            summary.get("pqc_score", 0),
+                "crypto_agility_score": summary.get("crypto_agility_score", 0),
+                "quantum_risk_horizon": summary.get("quantum_risk_horizon", "N/A"),
                 "hndl_risk":            summary.get("hndl_risk", False),
                 "confidence_score":     summary.get("confidence_score", 0),
-                "crypto_mode":          summary.get("crypto_mode"),
+                "crypto_mode":          summary.get("crypto_mode", "UNKNOWN"),
             },
             "ip_details": ip_details,
             "findings":   findings,
