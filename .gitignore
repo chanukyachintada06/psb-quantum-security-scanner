@@ -23,8 +23,10 @@ Thumbs.db
 *.log
 push_error.txt
 
-# Project Documentation & SQL Schema (Supabase)
-quantum_safe_scanner_synopsis.md
-supabase_schema.sql
-supabase_step1_schema.sql
-supabase_step2_testdata.sql
+# Testing Artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Archived / Obsolete Files
+database/archive/
