@@ -1186,6 +1186,11 @@
         <h2 class="page-title">CBOM</h2>
         <p class="page-subtitle">Structured Cryptographic Bill of Materials aligned with CERT-IN Annexure-A requirements.</p>
       </div>
+
+      <div class="prototype-banner">
+        <span style="font-size: 1.2rem;">ℹ️</span>
+        <span>Certain enterprise-wide analytics shown below are prototype projections for demonstration purposes.</span>
+      </div>
       
       <!-- Top Stat Row -->
       <div class="cbom-stats-row stat-grid">
@@ -1197,25 +1202,37 @@
         </div>
         <div class="stat-card">
           <div class="stat-content">
-            <span class="stat-label">Sites Surveyed</span>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="stat-label">Sites Surveyed</span>
+              <span class="prototype-badge">Demo</span>
+            </div>
             <span class="stat-value">56</span>
           </div>
         </div>
         <div class="stat-card">
           <div class="stat-content">
-            <span class="stat-label">Active Certificates</span>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="stat-label">Active Certificates</span>
+              <span class="prototype-badge">Demo</span>
+            </div>
             <span class="stat-value">93</span>
           </div>
         </div>
         <div class="stat-card stat-danger">
           <div class="stat-content">
-            <span class="stat-label">Weak Cryptography</span>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="stat-label">Weak Cryptography</span>
+              <span class="prototype-badge" style="border-color: rgba(200,16,46,0.2);">Demo</span>
+            </div>
             <span class="stat-value stat-danger-value">22</span>
           </div>
         </div>
         <div class="stat-card stat-warning">
           <div class="stat-content">
-            <span class="stat-label">Certificate Issues</span>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="stat-label">Certificate Issues</span>
+              <span class="prototype-badge" style="border-color: rgba(192,120,0,0.2);">Demo</span>
+            </div>
             <span class="stat-value stat-warning-value">7</span>
           </div>
         </div>
@@ -1224,25 +1241,25 @@
       <!-- Charts Row -->
       <div class="cbom-charts-grid">
         <div class="card chart-card">
-          <h3 class="chart-title">Key Length Distribution</h3>
+          <h3 class="chart-title">Key Length Distribution <span class="prototype-badge">Demo Dataset</span></h3>
           <div class="cbom-chart-canvas-bar">
             <canvas id="chartKeyLength"></canvas>
           </div>
         </div>
         <div class="card chart-card">
-          <h3 class="chart-title">Cipher Usage</h3>
+          <h3 class="chart-title">Cipher Usage <span class="prototype-badge">Demo Dataset</span></h3>
           <div class="cbom-chart-canvas-bar">
             <canvas id="chartCipherUsage"></canvas>
           </div>
         </div>
         <div class="card chart-card">
-          <h3 class="chart-title">Top Certificate Authorities</h3>
+          <h3 class="chart-title">Top Certificate Authorities <span class="prototype-badge">Demo Dataset</span></h3>
           <div class="cbom-chart-canvas-donut">
             <canvas id="chartCertAuthorities"></canvas>
           </div>
         </div>
         <div class="card chart-card">
-          <h3 class="chart-title">Encryption Protocols</h3>
+          <h3 class="chart-title">Encryption Protocols <span class="prototype-badge">Demo Dataset</span></h3>
           <div class="cbom-chart-canvas-donut">
             <canvas id="chartEncryptionProtocols"></canvas>
           </div>
@@ -1252,7 +1269,7 @@
       <!-- Per-Application Cipher Table -->
       <div class="card table-card">
         <div class="table-card-header">
-          <h3 class="table-card-title">Top Certificate Authorities</h3>
+          <h3 class="table-card-title">Top Certificate Authorities <span class="prototype-badge">Illustrative Enterprise Projection</span></h3>
         </div>
         <div class="table-wrapper">
           <table class="history-table cbom-cipher-table">
@@ -1302,6 +1319,11 @@
         <p class="page-subtitle">Organization-wide PQC compliance posture, tier classification and remediation roadmap.</p>
       </div>
 
+      <div class="prototype-banner">
+        <span style="font-size: 1.2rem;">ℹ️</span>
+        <span>Certain enterprise-wide analytics shown below are prototype projections for demonstration purposes.</span>
+      </div>
+
       <!-- Top Summary Bar -->
       <div class="pqc-summary-bar">
         <div class="pqc-chip">
@@ -1326,21 +1348,21 @@
       <div class="pqc-three-grid">
         <!-- Panel A: Classification Grade (Bar) -->
         <div class="card chart-card">
-          <h3 class="chart-title">Assets by Classification Grade</h3>
+          <h3 class="chart-title">Assets by Classification Grade <span class="prototype-badge">Demo Dataset</span></h3>
           <div class="cbom-chart-canvas-bar">
             <canvas id="chartClassificationGrade"></canvas>
           </div>
         </div>
         <!-- Panel B: Application Status (Donut) -->
         <div class="card chart-card">
-          <h3 class="chart-title">Application Status</h3>
+          <h3 class="chart-title">Application Status <span class="prototype-badge">Demo Dataset</span></h3>
           <div class="cbom-chart-canvas-donut" style="height: 220px;">
             <canvas id="chartApplicationStatus"></canvas>
           </div>
         </div>
         <!-- Panel C: Risk Heatmap -->
         <div class="card chart-card">
-          <h3 class="chart-title">Risk Overview</h3>
+          <h3 class="chart-title">Risk Overview <span class="prototype-badge">Illustrative Projection</span></h3>
           <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 220px;">
             <!-- Headers -->
             <div style="display: flex; margin-bottom: 6px; width: 100%;">
@@ -1393,7 +1415,7 @@
         <!-- PQC Support Table -->
         <div class="card table-card" style="margin-bottom: 0;">
           <div class="table-card-header">
-            <h3 class="table-card-title">PQC Support Status</h3>
+            <h3 class="table-card-title">PQC Support Status <span class="prototype-badge">Demo Dataset</span></h3>
           </div>
           <div class="table-wrapper">
             <table class="history-table cbom-cipher-table">
@@ -1423,7 +1445,7 @@
         
         <!-- App Details Panel -->
         <div class="card chart-card">
-          <h3 class="chart-title">App A Details</h3>
+          <h3 class="chart-title">App A Details <span class="prototype-badge">Mock Data</span></h3>
           <div style="display: flex; flex-direction: column;">
             <div class="app-details-row">
               <span style="color: var(--pnb-text-muted);">App A</span>
@@ -1454,7 +1476,7 @@
       </div>
 
       <!-- Improvement Recommendations -->
-      <h3 class="chart-title" style="margin-top: 12px; margin-bottom: 16px; border: none;">Improvement Recommendations</h3>
+      <h3 class="chart-title" style="margin-top: 12px; margin-bottom: 16px; border: none;">Improvement Recommendations <span class="prototype-badge">Demo Projections</span></h3>
       <div class="rec-grid">
         <div class="rec-item-pqc">
           <span style="font-size: 1.2rem;">⚠️</span>
@@ -1477,7 +1499,7 @@
       <!-- Tier Classification Table -->
       <div class="card table-card" style="margin-bottom: 24px;">
         <div class="table-card-header">
-          <h3 class="table-card-title">PQC Compliance Tiers</h3>
+          <h3 class="table-card-title">PQC Compliance Tiers <span class="prototype-badge">Industry Standard</span></h3>
         </div>
         <div class="table-wrapper">
           <table class="history-table tier-table" style="width: 100%;">
@@ -1527,9 +1549,14 @@
         <p class="page-subtitle">Consolidated enterprise quantum-readiness score against NIST PQC migration benchmarks.</p>
       </div>
 
+      <div class="prototype-banner">
+        <span style="font-size: 1.2rem;">ℹ️</span>
+        <span>Certain enterprise-wide analytics shown below are prototype projections for demonstration purposes.</span>
+      </div>
+
       <!-- Enterprise Score Card -->
       <div class="card cyber-score-card">
-        <h3 class="chart-title" style="border: none; margin-bottom: 24px;">Consolidated Enterprise-Level Cyber-Rating Score</h3>
+        <h3 class="chart-title" style="border: none; margin-bottom: 24px;">Consolidated Enterprise-Level Cyber-Rating Score <span class="prototype-badge">Demo Projection</span></h3>
         <div class="cyber-score-display">
           <div class="cyber-score-number">755<span class="cyber-score-suffix">/1000</span></div>
           <div class="cyber-elite-badge">Elite-PQC</div>
@@ -1555,7 +1582,7 @@
         <!-- Rating Tier Table -->
         <div class="card table-card" style="margin-bottom: 0;">
           <div class="table-card-header">
-            <h3 class="table-card-title">PQC Rating Scale</h3>
+            <h3 class="table-card-title">PQC Rating Scale <span class="prototype-badge">Industry Benchmarks</span></h3>
           </div>
           <div class="table-wrapper">
             <table class="history-table cbom-cipher-table" style="width: 100%;">
@@ -1590,7 +1617,7 @@
         <!-- Per-Asset PQC Scores Table -->
         <div class="card table-card" style="margin-bottom: 0;">
           <div class="table-card-header">
-            <h3 class="table-card-title">Per-Asset PQC Scores</h3>
+            <h3 class="table-card-title">Per-Asset PQC Scores <span class="prototype-badge">Sample Metrics</span></h3>
           </div>
           <div class="table-wrapper">
             <table class="history-table cbom-cipher-table" style="width: 100%;">
